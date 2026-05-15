@@ -165,9 +165,11 @@ export const AccessPage = () => {
 
                     {error && <Alert variant="danger" title={error} isInline style={{ marginBottom: "1rem" }} />}
 
-                    <Button variant="primary" onClick={() => setShowAdd(true)} style={{ marginBottom: "1rem" }}>
-                        {_("Add SSH Key")}
-                    </Button>
+                    {keys.length > 0 && (
+                        <Button variant="primary" onClick={() => setShowAdd(true)} style={{ marginBottom: "1rem" }}>
+                            {_("Add SSH Key")}
+                        </Button>
+                    )}
 
                     {keys.length === 0
                         ? (

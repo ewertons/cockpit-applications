@@ -5,70 +5,118 @@ import { Alert } from "@patternfly/react-core/dist/esm/components/Alert/index.js
 import { Spinner } from "@patternfly/react-core/dist/esm/components/Spinner/index.js";
 import { Label } from "@patternfly/react-core/dist/esm/components/Label/index.js";
 import { Switch } from "@patternfly/react-core/dist/esm/components/Switch/index.js";
+import { Modal, ModalBody, ModalFooter, ModalHeader } from "@patternfly/react-core/dist/esm/components/Modal/index.js";
 import { DescriptionList, DescriptionListDescription, DescriptionListGroup, DescriptionListTerm } from "@patternfly/react-core/dist/esm/components/DescriptionList/index.js";
 
 import cockpit from 'cockpit';
 
 const _ = cockpit.gettext;
 
-interface ServiceInfo {
-    name: string;
+interface ServiceDef {
+    units: string[];  // possible unit names (first found wins)
     displayName: string;
     description: string;
+    packages: { apt: string; dnf: string };
+}
+
+interface ServiceInfo extends ServiceDef {
+    unit: string;     // resolved unit name
     activeState: string;
     subState: string;
     unitFileState: string;
+    installed: boolean;
 }
 
-const SERVICES = [
-    { unit: "git-daemon.service", displayName: "Git Daemon", description: _("Serves repositories over the git:// protocol") },
-    { unit: "sshd.service", displayName: "SSH Server", description: _("Provides SSH access for git push/pull") },
+const SERVICES: ServiceDef[] = [
+    {
+        units: ["git-daemon.service"],
+        displayName: "Git Daemon",
+        description: _("Serves repositories over the git:// protocol"),
+        packages: { apt: "git-daemon-sysvinit", dnf: "git-daemon" },
+    },
+    {
+        units: ["ssh.service", "sshd.service"],
+        displayName: "SSH Server",
+        description: _("Provides SSH access for git push/pull"),
+        packages: { apt: "openssh-server", dnf: "openssh-server" },
+    },
 ];
+
+type PkgManager = "apt" | "dnf" | null;
 
 export const ServicesPage = () => {
     const [services, setServices] = useState<ServiceInfo[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [actionInProgress, setActionInProgress] = useState<string | null>(null);
+    const [pkgManager, setPkgManager] = useState<PkgManager>(null);
 
-    const systemd = cockpit.dbus("org.freedesktop.systemd1", { superuser: "try" });
+    // Uninstall confirmation modal
+    const [uninstallTarget, setUninstallTarget] = useState<ServiceInfo | null>(null);
+    const [uninstalling, setUninstalling] = useState(false);
+
+    // Detect package manager once
+    useEffect(() => {
+        cockpit.spawn(["which", "apt-get"], { err: "ignore" })
+                .then(() => setPkgManager("apt"))
+                .catch(() => {
+                    cockpit.spawn(["which", "dnf"], { err: "ignore" })
+                            .then(() => setPkgManager("dnf"))
+                            .catch(() => setPkgManager(null));
+                });
+    }, []);
 
     const loadServices = useCallback(() => {
         setLoading(true);
         setError("");
 
-        const promises = SERVICES.map(svc => {
-            return systemd.call(
-                "/org/freedesktop/systemd1",
-                "org.freedesktop.systemd1.Manager",
-                "GetUnit",
-                [svc.unit]
-            ).then((result: [string]) => {
-                const unitPath = result[0];
-                return systemd.call(
-                    unitPath,
-                    "org.freedesktop.DBus.Properties",
-                    "GetAll",
-                    ["org.freedesktop.systemd1.Unit"]
-                ).then((propsResult: [Record<string, { v: unknown }>]) => {
-                    const props = propsResult[0];
-                    return {
-                        name: svc.unit,
-                        displayName: svc.displayName,
-                        description: svc.description,
-                        activeState: String(props.ActiveState?.v || "unknown"),
-                        subState: String(props.SubState?.v || "unknown"),
-                        unitFileState: String(props.UnitFileState?.v || "unknown"),
-                    };
+        // For each service, try each possible unit name to find the right one
+        const findUnit = async (svc: ServiceDef): Promise<{ unit: string; installed: boolean }> => {
+            for (const unit of svc.units) {
+                try {
+                    await cockpit.spawn(["systemctl", "cat", unit], { err: "ignore" });
+                    return { unit, installed: true };
+                } catch {
+                    // try next
+                }
+            }
+            return { unit: svc.units[0], installed: false };
+        };
+
+        const promises = SERVICES.map(async svc => {
+            const { unit, installed } = await findUnit(svc);
+
+            if (!installed) {
+                return {
+                    ...svc,
+                    unit,
+                    installed: false,
+                    activeState: "not-installed",
+                    subState: "not-installed",
+                    unitFileState: "not-installed",
+                };
+            }
+
+            const props: Record<string, string> = {};
+            try {
+                const output: string = await cockpit.spawn(
+                    ["systemctl", "show", unit, "--property=ActiveState,SubState,UnitFileState"],
+                    { err: "ignore" }
+                );
+                output.trim().split("\n").forEach(line => {
+                    const [key, ...rest] = line.split("=");
+                    if (key) props[key] = rest.join("=");
                 });
-            }).catch(() => ({
-                name: svc.unit,
-                displayName: svc.displayName,
-                description: svc.description,
-                activeState: "not-found",
-                subState: "not-found",
-                unitFileState: "not-found",
-            }));
+            } catch { /* use defaults */ }
+
+            return {
+                ...svc,
+                unit,
+                installed: true,
+                activeState: props.ActiveState || "unknown",
+                subState: props.SubState || "unknown",
+                unitFileState: props.UnitFileState || "unknown",
+            };
         });
 
         Promise.all(promises).then(results => {
@@ -78,44 +126,87 @@ export const ServicesPage = () => {
             setError(ex.message || String(ex));
             setLoading(false);
         });
-    }, [systemd]);
+    }, []);
 
     useEffect(() => { loadServices() }, [loadServices]);
 
     const toggleService = (svc: ServiceInfo) => {
-        setActionInProgress(svc.name);
-        const method = svc.activeState === "active" ? "StopUnit" : "StartUnit";
+        setActionInProgress(svc.unit);
+        const action = svc.activeState === "active" ? "stop" : "start";
 
-        systemd.call(
-            "/org/freedesktop/systemd1",
-            "org.freedesktop.systemd1.Manager",
-            method,
-            [svc.name, "replace"]
-        ).then(() => {
-            // Wait a moment for the state to change
-            setTimeout(loadServices, 1000);
-            setActionInProgress(null);
-        }).catch((ex: cockpit.BasicError) => {
-            setError(ex.message || String(ex));
-            setActionInProgress(null);
-        });
+        cockpit.spawn(["systemctl", action, svc.unit], { superuser: "require", err: "message" })
+                .then(() => {
+                    setTimeout(loadServices, 1000);
+                    setActionInProgress(null);
+                })
+                .catch((ex: cockpit.BasicError) => {
+                    setError(ex.message || String(ex));
+                    setActionInProgress(null);
+                });
     };
 
     const restartService = (svc: ServiceInfo) => {
-        setActionInProgress(svc.name);
+        setActionInProgress(svc.unit);
 
-        systemd.call(
-            "/org/freedesktop/systemd1",
-            "org.freedesktop.systemd1.Manager",
-            "RestartUnit",
-            [svc.name, "replace"]
-        ).then(() => {
-            setTimeout(loadServices, 1000);
-            setActionInProgress(null);
-        }).catch((ex: cockpit.BasicError) => {
-            setError(ex.message || String(ex));
-            setActionInProgress(null);
-        });
+        cockpit.spawn(["systemctl", "restart", svc.unit], { superuser: "require", err: "message" })
+                .then(() => {
+                    setTimeout(loadServices, 1000);
+                    setActionInProgress(null);
+                })
+                .catch((ex: cockpit.BasicError) => {
+                    setError(ex.message || String(ex));
+                    setActionInProgress(null);
+                });
+    };
+
+    const installPackage = (svc: ServiceInfo) => {
+        if (!pkgManager) {
+            setError(_("No supported package manager found (apt or dnf)."));
+            return;
+        }
+        setActionInProgress(svc.unit);
+        setError("");
+
+        const pkg = pkgManager === "apt" ? svc.packages.apt : svc.packages.dnf;
+        const cmd = pkgManager === "apt"
+            ? ["apt-get", "install", "-y", pkg]
+            : ["dnf", "install", "-y", pkg];
+
+        cockpit.spawn(cmd, { superuser: "require", err: "message" })
+                .then(() => {
+                    setTimeout(loadServices, 2000);
+                    setActionInProgress(null);
+                })
+                .catch((ex: cockpit.BasicError) => {
+                    setError(ex.message || String(ex));
+                    setActionInProgress(null);
+                });
+    };
+
+    const uninstallPackage = (svc: ServiceInfo) => {
+        if (!pkgManager) {
+            setError(_("No supported package manager found (apt or dnf)."));
+            return;
+        }
+        setUninstalling(true);
+        setError("");
+
+        const pkg = pkgManager === "apt" ? svc.packages.apt : svc.packages.dnf;
+        const cmd = pkgManager === "apt"
+            ? ["apt-get", "remove", "-y", pkg]
+            : ["dnf", "remove", "-y", pkg];
+
+        cockpit.spawn(cmd, { superuser: "require", err: "message" })
+                .then(() => {
+                    setUninstallTarget(null);
+                    setUninstalling(false);
+                    setTimeout(loadServices, 2000);
+                })
+                .catch((ex: cockpit.BasicError) => {
+                    setError(ex.message || String(ex));
+                    setUninstallTarget(null);
+                    setUninstalling(false);
+                });
     };
 
     const stateColor = (state: string): "green" | "red" | "grey" | "orange" => {
@@ -123,9 +214,14 @@ export const ServicesPage = () => {
         case "active": return "green";
         case "failed": return "red";
         case "inactive": return "grey";
-        case "not-found": return "orange";
+        case "not-installed": return "orange";
         default: return "grey";
         }
+    };
+
+    const stateLabel = (svc: ServiceInfo): string => {
+        if (!svc.installed) return _("Not installed");
+        return `${svc.activeState} (${svc.subState})`;
     };
 
     if (loading) return <Spinner aria-label={_("Loading services")} />;
@@ -137,11 +233,11 @@ export const ServicesPage = () => {
             {error && <Alert variant="danger" title={error} isInline style={{ marginBottom: "1rem" }} />}
 
             {services.map(svc => (
-                <Card key={svc.name} isCompact style={{ marginBottom: "1rem" }}>
+                <Card key={svc.unit} isCompact style={{ marginBottom: "1rem" }}>
                     <CardTitle>
                         {svc.displayName}
                         <Label color={stateColor(svc.activeState)} style={{ marginLeft: "1rem" }}>
-                            {svc.activeState === "not-found" ? _("Not installed") : `${svc.activeState} (${svc.subState})`}
+                            {stateLabel(svc)}
                         </Label>
                     </CardTitle>
                     <CardBody>
@@ -150,37 +246,93 @@ export const ServicesPage = () => {
                         <DescriptionList isHorizontal isCompact style={{ marginTop: "0.5rem" }}>
                             <DescriptionListGroup>
                                 <DescriptionListTerm>{_("Unit")}</DescriptionListTerm>
-                                <DescriptionListDescription>{svc.name}</DescriptionListDescription>
+                                <DescriptionListDescription>{svc.unit}</DescriptionListDescription>
                             </DescriptionListGroup>
                             <DescriptionListGroup>
-                                <DescriptionListTerm>{_("Enabled")}</DescriptionListTerm>
-                                <DescriptionListDescription>{svc.unitFileState}</DescriptionListDescription>
+                                <DescriptionListTerm>{_("Installed")}</DescriptionListTerm>
+                                <DescriptionListDescription>
+                                    <Label color={svc.installed ? "green" : "orange"}>
+                                        {svc.installed ? _("Yes") : _("No")}
+                                    </Label>
+                                </DescriptionListDescription>
                             </DescriptionListGroup>
+                            {svc.installed && (
+                                <DescriptionListGroup>
+                                    <DescriptionListTerm>{_("Enabled")}</DescriptionListTerm>
+                                    <DescriptionListDescription>{svc.unitFileState}</DescriptionListDescription>
+                                </DescriptionListGroup>
+                            )}
                         </DescriptionList>
 
-                        {svc.activeState !== "not-found" && (
-                            <div style={{ marginTop: "1rem", display: "flex", gap: "0.5rem", alignItems: "center" }}>
-                                <Switch
-                                    id={`switch-${svc.name}`}
-                                    label={_("Running")}
-                                    labelOff={_("Stopped")}
-                                    isChecked={svc.activeState === "active"}
-                                    onChange={() => toggleService(svc)}
-                                    isDisabled={actionInProgress === svc.name}
-                                />
-                                <Button
-                                    variant="secondary"
-                                    onClick={() => restartService(svc)}
-                                    isDisabled={svc.activeState !== "active" || actionInProgress === svc.name}
-                                    isLoading={actionInProgress === svc.name}
-                                >
-                                    {_("Restart")}
-                                </Button>
-                            </div>
-                        )}
+                        <div style={{ marginTop: "1rem", display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+                            {svc.installed
+                                ? (
+                                    <>
+                                        <Switch
+                                            id={`switch-${svc.unit}`}
+                                            label={_("Running")}
+                                            labelOff={_("Stopped")}
+                                            isChecked={svc.activeState === "active"}
+                                            onChange={() => toggleService(svc)}
+                                            isDisabled={actionInProgress === svc.unit}
+                                        />
+                                        <Button
+                                            variant="secondary"
+                                            onClick={() => restartService(svc)}
+                                            isDisabled={svc.activeState !== "active" || actionInProgress === svc.unit}
+                                            isLoading={actionInProgress === svc.unit}
+                                        >
+                                            {_("Restart")}
+                                        </Button>
+                                        <Button
+                                            variant="danger"
+                                            onClick={() => setUninstallTarget(svc)}
+                                            isDisabled={actionInProgress === svc.unit}
+                                        >
+                                            {_("Uninstall")}
+                                        </Button>
+                                    </>
+                                )
+                                : (
+                                    <Button
+                                        variant="primary"
+                                        onClick={() => installPackage(svc)}
+                                        isLoading={actionInProgress === svc.unit}
+                                        isDisabled={actionInProgress === svc.unit || !pkgManager}
+                                    >
+                                        {_("Install")}
+                                    </Button>
+                                )}
+                        </div>
                     </CardBody>
                 </Card>
             ))}
+
+            {uninstallTarget && (
+                <Modal variant="small" isOpen onClose={() => setUninstallTarget(null)}>
+                    <ModalHeader title={cockpit.format(_("Uninstall $0?"), uninstallTarget.displayName)} />
+                    <ModalBody>
+                        <Alert variant="warning" title={_("This will remove the package from the system.")} isInline />
+                        <p style={{ marginTop: "0.5rem" }}>
+                            {cockpit.format(
+                                _("Package: $0"),
+                                pkgManager === "apt" ? uninstallTarget.packages.apt : uninstallTarget.packages.dnf
+                            )}
+                        </p>
+                        <p style={{ marginTop: "0.25rem" }}>
+                            {_("The service will be stopped and removed. Are you sure?")}
+                        </p>
+                    </ModalBody>
+                    <ModalFooter>
+                        <Button variant="danger" onClick={() => uninstallPackage(uninstallTarget)} isLoading={uninstalling} isDisabled={uninstalling}>
+                            {_("Uninstall")}
+                        </Button>
+                        <Button variant="link" onClick={() => setUninstallTarget(null)}>
+                            {_("Cancel")}
+                        </Button>
+                    </ModalFooter>
+                </Modal>
+            )}
         </>
     );
 };

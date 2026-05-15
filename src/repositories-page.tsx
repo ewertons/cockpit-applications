@@ -148,9 +148,11 @@ export const RepositoriesPage = () => {
         <>
             <div className="repo-header">
                 <CardTitle>{_("Git Repositories")}</CardTitle>
-                <Button variant="primary" onClick={() => setShowCreate(true)}>
-                    {_("Create Repository")}
-                </Button>
+                {repos.length > 0 && (
+                    <Button variant="primary" onClick={() => setShowCreate(true)}>
+                        {_("Create Repository")}
+                    </Button>
+                )}
             </div>
 
             {error && <Alert variant="danger" title={error} isInline />}
