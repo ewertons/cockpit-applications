@@ -51,11 +51,16 @@ export const RepositoryDetail = ({ repoName }: RepositoryDetailProps) => {
                     .catch(() => ""),
             gitCmd(["symbolic-ref", "HEAD"]),
         ]).then(([branchOut, tagOut, logOut, configOut, descOut, headRef]: [string, string, string, string, string, string]) => {
-            const branchList = branchOut.trim().split("\n").filter(Boolean).map(b => b.replace(/^\*?\s*/, ""));
+            const branchList = branchOut.trim().split("\n")
+                    .filter(Boolean)
+                    .map(b => b.replace(/^\*?\s*/, ""));
             setBranches(branchList);
-            setTags(tagOut.trim().split("\n").filter(Boolean));
-            setCommits(logOut.trim().split("\n").filter(Boolean));
-            setConfig(configOut.trim().split("\n").filter(Boolean));
+            setTags(tagOut.trim().split("\n")
+                    .filter(Boolean));
+            setCommits(logOut.trim().split("\n")
+                    .filter(Boolean));
+            setConfig(configOut.trim().split("\n")
+                    .filter(Boolean));
             setDescription(descOut?.trim() || "");
             setLoading(false);
 
@@ -67,10 +72,11 @@ export const RepositoryDetail = ({ repoName }: RepositoryDetailProps) => {
                     cockpit.spawn(["git", "--git-dir", repoPath, "symbolic-ref", "HEAD", `refs/heads/${target}`], { superuser: "try", err: "ignore" });
                 }
             }
-        }).catch((ex: cockpit.BasicError) => {
-            setError(ex.message || String(ex));
-            setLoading(false);
-        });
+        })
+                .catch((ex: cockpit.BasicError) => {
+                    setError(ex.message || String(ex));
+                    setLoading(false);
+                });
     }, [repoPath]);
 
     useEffect(() => { loadData() }, [loadData]);
@@ -125,7 +131,7 @@ export const RepositoryDetail = ({ repoName }: RepositoryDetailProps) => {
 
                         <p><strong>{_("…or create a new repository on the command line")}</strong></p>
                         <pre style={{ background: "var(--pf-t--global--background--color--secondary--default)", padding: "0.75rem", borderRadius: "var(--pf-t--global--border--radius--small)", marginBottom: "1rem", whiteSpace: "pre-wrap" }}>
-{`echo "# ${repoName.replace(/\.git$/, "")}" >> README.md
+                            {`echo "# ${repoName.replace(/\.git$/, "")}" >> README.md
 git init
 git add README.md
 git commit -m "first commit"
@@ -136,7 +142,7 @@ git push -u origin main`}
 
                         <p><strong>{_("…or push an existing repository from the command line")}</strong></p>
                         <pre style={{ background: "var(--pf-t--global--background--color--secondary--default)", padding: "0.75rem", borderRadius: "var(--pf-t--global--border--radius--small)", whiteSpace: "pre-wrap" }}>
-{`git remote add origin git@${hostname}:${repoPath}
+                            {`git remote add origin git@${hostname}:${repoPath}
 git branch -M main
 git push -u origin main`}
                         </pre>

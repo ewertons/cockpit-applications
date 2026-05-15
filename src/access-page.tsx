@@ -23,18 +23,21 @@ interface SSHKey {
 }
 
 function parseAuthorizedKeys(content: string): SSHKey[] {
-    return content.trim().split("\n").filter(Boolean).map((line, i) => {
-        // Skip comment lines
-        if (line.startsWith("#")) return null;
-        const parts = line.trim().split(/\s+/);
-        if (parts.length < 2) return null;
-        return {
-            type: parts[0],
-            key: parts[1],
-            comment: parts.slice(2).join(" "),
-            line: i,
-        };
-    }).filter(Boolean) as SSHKey[];
+    return content.trim().split("\n")
+            .filter(Boolean)
+            .map((line, i) => {
+            // Skip comment lines
+                if (line.startsWith("#")) return null;
+                const parts = line.trim().split(/\s+/);
+                if (parts.length < 2) return null;
+                return {
+                    type: parts[0],
+                    key: parts[1],
+                    comment: parts.slice(2).join(" "),
+                    line: i,
+                };
+            })
+            .filter(Boolean) as SSHKey[];
 }
 
 function fingerprint(key: string): string {
@@ -104,7 +107,8 @@ export const AccessPage = () => {
 
         // Append key with optional comment
         let newLine = keyContent;
-        if (newKeyLabel.trim() && !keyContent.split(/\s+/).slice(2).join(" ")) {
+        if (newKeyLabel.trim() && !keyContent.split(/\s+/).slice(2)
+                .join(" ")) {
             newLine = keyContent + " " + newKeyLabel.trim();
         }
 

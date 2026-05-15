@@ -57,7 +57,8 @@ export const RepositoriesPage = () => {
             { superuser: "try", err: "ignore" }
         )
                 .then((output: string) => {
-                    const dirs = output.trim().split("\n").filter(Boolean);
+                    const dirs = output.trim().split("\n")
+                            .filter(Boolean);
                     if (dirs.length === 0) {
                         setRepos([]);
                         setLoading(false);
@@ -185,7 +186,7 @@ export const RepositoriesPage = () => {
 
                         <p style={{ marginTop: "1rem" }}><strong>{_("…or create a new repository on the command line")}</strong></p>
                         <pre style={{ background: "var(--pf-t--global--background--color--secondary--default)", padding: "0.75rem", borderRadius: "var(--pf-t--global--border--radius--small)", marginBottom: "1rem", whiteSpace: "pre-wrap" }}>
-{`echo "# ${justCreated.name.replace(/\.git$/, "")}" >> README.md
+                            {`echo "# ${justCreated.name.replace(/\.git$/, "")}" >> README.md
 git init
 git add README.md
 git commit -m "first commit"
@@ -196,7 +197,7 @@ git push -u origin main`}
 
                         <p><strong>{_("…or push an existing repository from the command line")}</strong></p>
                         <pre style={{ background: "var(--pf-t--global--background--color--secondary--default)", padding: "0.75rem", borderRadius: "var(--pf-t--global--border--radius--small)", whiteSpace: "pre-wrap" }}>
-{`git remote add origin git@${hostname}:${justCreated.path}
+                            {`git remote add origin git@${hostname}:${justCreated.path}
 git branch -M main
 git push -u origin main`}
                         </pre>
@@ -220,32 +221,32 @@ git push -u origin main`}
                     </EmptyState>
                 )
                 : repos
-                    .filter(repo => !filter || repo.name.toLowerCase().includes(filter.toLowerCase()))
-                    .map(repo => (
-                        <Card key={repo.name} isCompact isFlat style={{ marginBottom: "0.5rem", padding: "0.5rem" }}>
-                            <CardBody style={{ padding: "0.5rem" }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                    <div style={{ flex: 1 }}>
-                                        <Button variant="link" isInline onClick={() => navigateToRepo(repo)} style={{ fontWeight: "bold" }}>
-                                            {repo.name}
-                                        </Button>
-                                        <span style={{ marginLeft: "1rem", fontSize: "small", color: "var(--pf-t--global--text--color--subtle)" }}>
-                                            {repo.size} · {repo.lastModified}
-                                        </span>
+                        .filter(repo => !filter || repo.name.toLowerCase().includes(filter.toLowerCase()))
+                        .map(repo => (
+                            <Card key={repo.name} isCompact isFlat style={{ marginBottom: "0.5rem", padding: "0.5rem" }}>
+                                <CardBody style={{ padding: "0.5rem" }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                        <div style={{ flex: 1 }}>
+                                            <Button variant="link" isInline onClick={() => navigateToRepo(repo)} style={{ fontWeight: "bold" }}>
+                                                {repo.name}
+                                            </Button>
+                                            <span style={{ marginLeft: "1rem", fontSize: "small", color: "var(--pf-t--global--text--color--subtle)" }}>
+                                                {repo.size} · {repo.lastModified}
+                                            </span>
+                                        </div>
+                                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                            <ClipboardCopy isReadOnly variant="inline-compact">{`git@${hostname}:${repo.path}`}</ClipboardCopy>
+                                            <Button variant="secondary" size="sm" onClick={() => navigateToBrowse(repo)}>
+                                                {_("Browse")}
+                                            </Button>
+                                            <Button variant="danger" size="sm" onClick={() => setDeleteRepo(repo)}>
+                                                {_("Delete")}
+                                            </Button>
+                                        </div>
                                     </div>
-                                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                                        <ClipboardCopy isReadOnly variant="inline-compact">{`git@${hostname}:${repo.path}`}</ClipboardCopy>
-                                        <Button variant="secondary" size="sm" onClick={() => navigateToBrowse(repo)}>
-                                            {_("Browse")}
-                                        </Button>
-                                        <Button variant="danger" size="sm" onClick={() => setDeleteRepo(repo)}>
-                                            {_("Delete")}
-                                        </Button>
-                                    </div>
-                                </div>
-                            </CardBody>
-                        </Card>
-                    ))}
+                                </CardBody>
+                            </Card>
+                        ))}
 
             {showCreate && (
                 <Modal variant="small" isOpen onClose={() => { setShowCreate(false); setCreateError("") }}>

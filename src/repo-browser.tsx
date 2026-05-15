@@ -65,7 +65,7 @@ export const RepoBrowser = ({ repoName, currentRef, currentPath, commitHash }: R
     const [viewingCommit, setViewingCommit] = useState<CommitInfo | null>(null);
 
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState("");
+    const [error] = useState("");
 
     const gitCmd = useCallback((args: string[]) =>
         cockpit.spawn(["git", "--git-dir", repoPath, ...args], { superuser: "try", err: "ignore" })
@@ -77,8 +77,10 @@ export const RepoBrowser = ({ repoName, currentRef, currentPath, commitHash }: R
             gitCmd(["branch", "--format=%(refname:short)"]),
             gitCmd(["tag"]),
         ]).then(([branchOut, tagOut]: [string, string]) => {
-            setBranches(branchOut.trim().split("\n").filter(Boolean));
-            setTags(tagOut.trim().split("\n").filter(Boolean));
+            setBranches(branchOut.trim().split("\n")
+                    .filter(Boolean));
+            setTags(tagOut.trim().split("\n")
+                    .filter(Boolean));
         });
     }, [gitCmd]);
 
@@ -91,18 +93,21 @@ export const RepoBrowser = ({ repoName, currentRef, currentPath, commitHash }: R
             gitCmd(["log", selectedRef, `--format=%H|%h|%an|%ai|%s`, `-${COMMITS_PER_PAGE}`, `--skip=${skip}`]),
             gitCmd(["rev-list", "--count", selectedRef]),
         ]).then(([logOut, countOut]: [string, string]) => {
-            const parsed = logOut.trim().split("\n").filter(Boolean).map(line => {
-                const [hash, shortHash, author, date, ...msgParts] = line.split("|");
-                return { hash, shortHash, author, date, message: msgParts.join("|") };
-            });
+            const parsed = logOut.trim().split("\n")
+                    .filter(Boolean)
+                    .map(line => {
+                        const [hash, shortHash, author, date, ...msgParts] = line.split("|");
+                        return { hash, shortHash, author, date, message: msgParts.join("|") };
+                    });
             setCommits(parsed);
             setTotalCommits(parseInt(countOut.trim()) || 0);
             setLoading(false);
-        }).catch(() => {
-            setCommits([]);
-            setTotalCommits(0);
-            setLoading(false);
-        });
+        })
+                .catch(() => {
+                    setCommits([]);
+                    setTotalCommits(0);
+                    setLoading(false);
+                });
     }, [gitCmd, selectedRef, commitPage]);
 
     useEffect(() => {
@@ -115,11 +120,14 @@ export const RepoBrowser = ({ repoName, currentRef, currentPath, commitHash }: R
         const treePath = browsingPath ? `${selectedRef}:${browsingPath}` : selectedRef;
 
         gitCmd(["ls-tree", treePath]).then((output: string) => {
-            const entries = output.trim().split("\n").filter(Boolean).map(line => {
-                const match = line.match(/^(\d+)\s+(blob|tree)\s+([0-9a-f]+)\s+(.+)$/);
-                if (!match) return null;
-                return { mode: match[1], type: match[2] as "blob" | "tree", hash: match[3], name: match[4] };
-            }).filter(Boolean) as TreeEntry[];
+            const entries = output.trim().split("\n")
+                    .filter(Boolean)
+                    .map(line => {
+                        const match = line.match(/^(\d+)\s+(blob|tree)\s+([0-9a-f]+)\s+(.+)$/);
+                        if (!match) return null;
+                        return { mode: match[1], type: match[2] as "blob" | "tree", hash: match[3], name: match[4] };
+                    })
+                    .filter(Boolean) as TreeEntry[];
 
             // Sort: directories first, then files
             entries.sort((a, b) => {
@@ -129,10 +137,11 @@ export const RepoBrowser = ({ repoName, currentRef, currentPath, commitHash }: R
 
             setTreeEntries(entries);
             setLoading(false);
-        }).catch(() => {
-            setTreeEntries([]);
-            setLoading(false);
-        });
+        })
+                .catch(() => {
+                    setTreeEntries([]);
+                    setLoading(false);
+                });
     }, [gitCmd, selectedRef, browsingPath]);
 
     useEffect(() => {
@@ -148,10 +157,11 @@ export const RepoBrowser = ({ repoName, currentRef, currentPath, commitHash }: R
         gitCmd(["show", `${selectedRef}:${filePath}`]).then((content: string) => {
             setFileContent(content);
             setLoading(false);
-        }).catch(() => {
-            setFileContent(_("Unable to display file content"));
-            setLoading(false);
-        });
+        })
+                .catch(() => {
+                    setFileContent(_("Unable to display file content"));
+                    setLoading(false);
+                });
     }, [gitCmd, selectedRef]);
 
     // View commit diff
@@ -165,16 +175,18 @@ export const RepoBrowser = ({ repoName, currentRef, currentPath, commitHash }: R
                 setDiffContent(statOut + "\n" + diffOut);
                 setLoading(false);
             });
-        }).catch(() => {
-            // First commit — no parent
-            gitCmd(["diff", "--root", commit.hash]).then((diffOut: string) => {
-                setDiffContent(diffOut);
-                setLoading(false);
-            }).catch(() => {
-                setDiffContent(_("Unable to display diff"));
-                setLoading(false);
-            });
-        });
+        })
+                .catch(() => {
+                    // First commit — no parent
+                    gitCmd(["diff", "--root", commit.hash]).then((diffOut: string) => {
+                        setDiffContent(diffOut);
+                        setLoading(false);
+                    })
+                            .catch(() => {
+                                setDiffContent(_("Unable to display diff"));
+                                setLoading(false);
+                            });
+                });
     }, [gitCmd]);
 
     // If commitHash was provided, load that diff
@@ -328,7 +340,7 @@ export const RepoBrowser = ({ repoName, currentRef, currentPath, commitHash }: R
                         )}
                 </Tab>
 
-                <Tab eventKey={2} title={<TabTitleText>{viewingFile ? viewingFile : _("File Viewer")}</TabTitleText>}>
+                <Tab eventKey={2} title={<TabTitleText>{viewingFile || _("File Viewer")}</TabTitleText>}>
                     {loading
                         ? <Spinner aria-label={_("Loading")} />
                         : (

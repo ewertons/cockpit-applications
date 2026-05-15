@@ -1,8 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Page } from "@patternfly/react-core/dist/esm/components/Page/index.js";
-import { PageSection } from "@patternfly/react-core/dist/esm/components/Page/index.js";
+import { Page, PageSection, PageSidebar, PageSidebarBody } from "@patternfly/react-core/dist/esm/components/Page/index.js";
 import { Nav, NavItem, NavList } from "@patternfly/react-core/dist/esm/components/Nav/index.js";
-import { PageSidebar, PageSidebarBody } from "@patternfly/react-core/dist/esm/components/Page/index.js";
 
 import cockpit from 'cockpit';
 

@@ -13,7 +13,7 @@ import cockpit from 'cockpit';
 const _ = cockpit.gettext;
 
 interface ServiceDef {
-    units: string[];  // possible unit names (first found wins)
+    units: string[]; // possible unit names (first found wins)
     displayName: string;
     description: string;
     packages: { apt: string; dnf: string };
@@ -21,7 +21,7 @@ interface ServiceDef {
 }
 
 interface ServiceInfo extends ServiceDef {
-    unit: string;     // resolved unit name
+    unit: string; // resolved unit name
     activeState: string;
     subState: string;
     unitFileState: string;
@@ -84,7 +84,8 @@ export const ServicesPage = () => {
             const pkg = pkgManager === "apt" ? svc.packages.apt : svc.packages.dnf;
             if (pkgManager === "apt") {
                 try {
-                    const out = await cockpit.spawn(["dpkg-query", "-W", "-f=${Status}", pkg], { err: "ignore" });
+                    const fmt = "-f=$" + "{Status}";
+                    const out = await cockpit.spawn(["dpkg-query", "-W", fmt, pkg], { err: "ignore" });
                     if (!out.includes("install ok installed")) {
                         return { unit: svc.units[0], installed: false };
                     }
@@ -130,10 +131,11 @@ export const ServicesPage = () => {
                     ["systemctl", "show", unit, "--property=ActiveState,SubState,UnitFileState"],
                     { err: "ignore" }
                 );
-                output.trim().split("\n").forEach(line => {
-                    const [key, ...rest] = line.split("=");
-                    if (key) props[key] = rest.join("=");
-                });
+                output.trim().split("\n")
+                        .forEach(line => {
+                            const [key, ...rest] = line.split("=");
+                            if (key) props[key] = rest.join("=");
+                        });
             } catch { /* use defaults */ }
 
             // Check firewall status for this service's port
@@ -170,11 +172,12 @@ export const ServicesPage = () => {
         Promise.all(promises).then(results => {
             setServices(results);
             setLoading(false);
-        }).catch((ex: cockpit.BasicError) => {
-            setError(ex.message || String(ex));
-            setLoading(false);
-        });
-    }, []);
+        })
+                .catch((ex: cockpit.BasicError) => {
+                    setError(ex.message || String(ex));
+                    setLoading(false);
+                });
+    }, [pkgManager]);
 
     useEffect(() => { loadServices() }, [loadServices]);
 
