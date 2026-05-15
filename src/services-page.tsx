@@ -17,6 +17,7 @@ interface ServiceDef {
     displayName: string;
     description: string;
     packages: { apt: string; dnf: string };
+    port?: number; // port to check in firewall
 }
 
 interface ServiceInfo extends ServiceDef {
@@ -25,6 +26,7 @@ interface ServiceInfo extends ServiceDef {
     subState: string;
     unitFileState: string;
     installed: boolean;
+    firewallBlocked?: boolean; // true if port is blocked by ufw
 }
 
 const SERVICES: ServiceDef[] = [
@@ -33,12 +35,14 @@ const SERVICES: ServiceDef[] = [
         displayName: "Git Daemon",
         description: _("Serves repositories over the git:// protocol"),
         packages: { apt: "git-daemon-sysvinit", dnf: "git-daemon" },
+        port: 9418,
     },
     {
         units: ["ssh.service", "sshd.service"],
         displayName: "SSH Server",
         description: _("Provides SSH access for git push/pull"),
         packages: { apt: "openssh-server", dnf: "openssh-server" },
+        port: 22,
     },
 ];
 
@@ -54,6 +58,10 @@ export const ServicesPage = () => {
     // Uninstall confirmation modal
     const [uninstallTarget, setUninstallTarget] = useState<ServiceInfo | null>(null);
     const [uninstalling, setUninstalling] = useState(false);
+
+    // Firewall open confirmation modal
+    const [firewallTarget, setFirewallTarget] = useState<ServiceInfo | null>(null);
+    const [openingFirewall, setOpeningFirewall] = useState(false);
 
     // Detect package manager once
     useEffect(() => {
@@ -72,6 +80,25 @@ export const ServicesPage = () => {
 
         // For each service, try each possible unit name to find the right one
         const findUnit = async (svc: ServiceDef): Promise<{ unit: string; installed: boolean }> => {
+            // First check if the package is actually installed
+            const pkg = pkgManager === "apt" ? svc.packages.apt : svc.packages.dnf;
+            if (pkgManager === "apt") {
+                try {
+                    const out = await cockpit.spawn(["dpkg-query", "-W", "-f=${Status}", pkg], { err: "ignore" });
+                    if (!out.includes("install ok installed")) {
+                        return { unit: svc.units[0], installed: false };
+                    }
+                } catch {
+                    return { unit: svc.units[0], installed: false };
+                }
+            } else if (pkgManager === "dnf") {
+                try {
+                    await cockpit.spawn(["rpm", "-q", pkg], { err: "ignore" });
+                } catch {
+                    return { unit: svc.units[0], installed: false };
+                }
+            }
+
             for (const unit of svc.units) {
                 try {
                     await cockpit.spawn(["systemctl", "cat", unit], { err: "ignore" });
@@ -109,6 +136,26 @@ export const ServicesPage = () => {
                 });
             } catch { /* use defaults */ }
 
+            // Check firewall status for this service's port
+            let firewallBlocked = false;
+            if (svc.port) {
+                try {
+                    const ufwOut: string = await cockpit.spawn(
+                        ["ufw", "status"], { superuser: "try", err: "ignore" }
+                    );
+                    if (ufwOut.includes("Status: active")) {
+                        // Check if this port is allowed
+                        const portStr = `${svc.port}`;
+                        const lines = ufwOut.split("\n");
+                        const allowed = lines.some(l =>
+                            (l.includes(portStr + "/tcp") || l.includes(portStr + " ")) &&
+                            l.includes("ALLOW")
+                        );
+                        if (!allowed) firewallBlocked = true;
+                    }
+                } catch { /* ufw not available, skip */ }
+            }
+
             return {
                 ...svc,
                 unit,
@@ -116,6 +163,7 @@ export const ServicesPage = () => {
                 activeState: props.ActiveState || "unknown",
                 subState: props.SubState || "unknown",
                 unitFileState: props.UnitFileState || "unknown",
+                firewallBlocked,
             };
         });
 
@@ -174,6 +222,19 @@ export const ServicesPage = () => {
 
         cockpit.spawn(cmd, { superuser: "require", err: "message" })
                 .then(() => {
+                    // Post-install: configure git-daemon to use /srv/git
+                    if (svc.unit === "git-daemon.service") {
+                        return cockpit.spawn(["bash", "-c",
+                            "sed -i 's/GIT_DAEMON_ENABLE=false/GIT_DAEMON_ENABLE=true/' /etc/default/git-daemon; " +
+                            "sed -i 's|GIT_DAEMON_BASE_PATH=.*|GIT_DAEMON_BASE_PATH=/srv/git|' /etc/default/git-daemon; " +
+                            "sed -i 's|GIT_DAEMON_DIRECTORY=.*|GIT_DAEMON_DIRECTORY=/srv/git|' /etc/default/git-daemon; " +
+                            "sed -i 's/GIT_DAEMON_USER=.*/GIT_DAEMON_USER=git/' /etc/default/git-daemon; " +
+                            "systemctl restart git-daemon"
+                        ], { superuser: "require", err: "ignore" });
+                    }
+                    return Promise.resolve("");
+                })
+                .then(() => {
                     setTimeout(loadServices, 2000);
                     setActionInProgress(null);
                 })
@@ -193,10 +254,19 @@ export const ServicesPage = () => {
 
         const pkg = pkgManager === "apt" ? svc.packages.apt : svc.packages.dnf;
         const cmd = pkgManager === "apt"
-            ? ["apt-get", "remove", "-y", pkg]
+            ? ["apt-get", "purge", "-y", pkg]
             : ["dnf", "remove", "-y", pkg];
 
         cockpit.spawn(cmd, { superuser: "require", err: "message" })
+                .then(() => cockpit.spawn(["systemctl", "daemon-reload"], { superuser: "require", err: "ignore" }))
+                .then(() => {
+                    // Remove firewall rule if port was opened
+                    if (svc.port) {
+                        return cockpit.spawn(["ufw", "delete", "allow", `${svc.port}/tcp`], { superuser: "require", err: "ignore" })
+                                .catch(() => ""); // ignore if ufw not installed
+                    }
+                    return Promise.resolve("");
+                })
                 .then(() => {
                     setUninstallTarget(null);
                     setUninstalling(false);
@@ -206,6 +276,26 @@ export const ServicesPage = () => {
                     setError(ex.message || String(ex));
                     setUninstallTarget(null);
                     setUninstalling(false);
+                });
+    };
+
+    const openFirewallPort = (svc: ServiceInfo) => {
+        if (!svc.port) return;
+        setOpeningFirewall(true);
+        setError("");
+
+        // Check if ufw is available first
+        cockpit.spawn(["which", "ufw"], { err: "ignore" })
+                .then(() => cockpit.spawn(["ufw", "allow", `${svc.port}/tcp`, "comment", svc.displayName], { superuser: "require", err: "message" }))
+                .then(() => {
+                    setFirewallTarget(null);
+                    setOpeningFirewall(false);
+                    setTimeout(loadServices, 1000);
+                })
+                .catch((ex: cockpit.BasicError) => {
+                    setError(ex.message ? ex.message : _("Failed to open port. Is ufw installed?"));
+                    setFirewallTarget(null);
+                    setOpeningFirewall(false);
                 });
     };
 
@@ -261,6 +351,20 @@ export const ServicesPage = () => {
                                 </DescriptionListGroup>
                             )}
                         </DescriptionList>
+
+                        {svc.installed && svc.firewallBlocked && (
+                            <Alert
+                                variant="warning"
+                                isInline
+                                title={cockpit.format(_("Port $0/tcp is blocked by the firewall. External clients cannot connect."), String(svc.port))}
+                                style={{ marginTop: "0.75rem" }}
+                                actionLinks={
+                                    <Button variant="link" onClick={() => setFirewallTarget(svc)}>
+                                        {_("Open port")}
+                                    </Button>
+                                }
+                            />
+                        )}
 
                         <div style={{ marginTop: "1rem", display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
                             {svc.installed
@@ -326,6 +430,31 @@ export const ServicesPage = () => {
                             {_("Uninstall")}
                         </Button>
                         <Button variant="link" onClick={() => setUninstallTarget(null)}>
+                            {_("Cancel")}
+                        </Button>
+                    </ModalFooter>
+                </Modal>
+            )}
+
+            {firewallTarget && (
+                <Modal variant="small" isOpen onClose={() => setFirewallTarget(null)}>
+                    <ModalHeader title={cockpit.format(_("Open firewall port for $0?"), firewallTarget.displayName)} />
+                    <ModalBody>
+                        <p>
+                            {cockpit.format(
+                                _("This will allow incoming connections on port $0/tcp through the firewall (ufw)."),
+                                String(firewallTarget.port)
+                            )}
+                        </p>
+                        <p style={{ marginTop: "0.5rem" }}>
+                            {_("This makes the service accessible from other machines on the network.")}
+                        </p>
+                    </ModalBody>
+                    <ModalFooter>
+                        <Button variant="primary" onClick={() => openFirewallPort(firewallTarget)} isLoading={openingFirewall} isDisabled={openingFirewall}>
+                            {_("Open Port")}
+                        </Button>
+                        <Button variant="link" onClick={() => setFirewallTarget(null)}>
                             {_("Cancel")}
                         </Button>
                     </ModalFooter>
