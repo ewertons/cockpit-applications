@@ -45,17 +45,28 @@ export const RepositoryDetail = ({ repoName }: RepositoryDetailProps) => {
         Promise.all([
             gitCmd(["branch"]),
             gitCmd(["tag"]),
-            gitCmd(["log", "--oneline", "-20"]),
+            gitCmd(["log", "--oneline", "--all", "-20"]),
             gitCmd(["config", "--list"]),
             cockpit.file(`${repoPath}/description`).read()
                     .catch(() => ""),
-        ]).then(([branchOut, tagOut, logOut, configOut, descOut]: [string, string, string, string, string]) => {
-            setBranches(branchOut.trim().split("\n").filter(Boolean).map(b => b.replace(/^\*?\s*/, "")));
+            gitCmd(["symbolic-ref", "HEAD"]),
+        ]).then(([branchOut, tagOut, logOut, configOut, descOut, headRef]: [string, string, string, string, string, string]) => {
+            const branchList = branchOut.trim().split("\n").filter(Boolean).map(b => b.replace(/^\*?\s*/, ""));
+            setBranches(branchList);
             setTags(tagOut.trim().split("\n").filter(Boolean));
             setCommits(logOut.trim().split("\n").filter(Boolean));
             setConfig(configOut.trim().split("\n").filter(Boolean));
             setDescription(descOut?.trim() || "");
             setLoading(false);
+
+            // Auto-fix HEAD if it points to a non-existent branch
+            if (branchList.length > 0 && headRef.trim()) {
+                const currentHead = headRef.trim().replace("refs/heads/", "");
+                if (!branchList.includes(currentHead)) {
+                    const target = branchList.includes("main") ? "main" : branchList[0];
+                    cockpit.spawn(["git", "--git-dir", repoPath, "symbolic-ref", "HEAD", `refs/heads/${target}`], { superuser: "try", err: "ignore" });
+                }
+            }
         }).catch((ex: cockpit.BasicError) => {
             setError(ex.message || String(ex));
             setLoading(false);

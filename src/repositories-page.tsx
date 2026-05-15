@@ -107,7 +107,7 @@ export const RepositoriesPage = () => {
         setCreating(true);
         setCreateError("");
 
-        cockpit.spawn(["git", "init", "--bare", repoPath], { superuser: "require" })
+        cockpit.spawn(["git", "init", "--bare", "--initial-branch=main", repoPath], { superuser: "require" })
                 .then(() => cockpit.spawn(["chown", "-R", "git:git", repoPath], { superuser: "require", err: "ignore" }))
                 .then(() => {
                     setShowCreate(false);
