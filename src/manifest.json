@@ -1,0 +1,19 @@
+{
+    "requires": {
+        "cockpit": "137"
+    },
+
+    "tools": {
+        "git-server": {
+            "label": "Git Server",
+            "path": "index.html",
+            "order": 55
+        }
+    },
+
+    "conditions": [
+        {
+            "path-exists": "/usr/bin/git"
+        }
+    ]
+}

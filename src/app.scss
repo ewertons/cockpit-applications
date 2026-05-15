@@ -1,0 +1,65 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+@use "page.scss";
+
+.git-server-app {
+    .pf-v6-c-page {
+        height: 100vh;
+    }
+}
+
+.repo-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.clone-url {
+    font-family: var(--pf-t--global--font--family--mono);
+    font-size: var(--pf-t--global--font--size--sm);
+    background: var(--pf-t--global--background--color--secondary--default);
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--pf-t--global--border--radius--small);
+}
+
+.commit-hash {
+    font-family: var(--pf-t--global--font--family--mono);
+    font-size: var(--pf-t--global--font--size--sm);
+}
+
+.file-content-viewer {
+    font-family: var(--pf-t--global--font--family--mono);
+    font-size: var(--pf-t--global--font--size--sm);
+    white-space: pre;
+    overflow-x: auto;
+    background: var(--pf-t--global--background--color--secondary--default);
+    padding: 1rem;
+    border-radius: var(--pf-t--global--border--radius--small);
+}
+
+.diff-viewer {
+    font-family: var(--pf-t--global--font--family--mono);
+    font-size: var(--pf-t--global--font--size--sm);
+    white-space: pre;
+    overflow-x: auto;
+}
+
+.diff-add {
+    background: var(--pf-t--global--color--status--success--default);
+    color: var(--pf-t--global--text--color--on-status--success--default);
+}
+
+.diff-remove {
+    background: var(--pf-t--global--color--status--danger--default);
+    color: var(--pf-t--global--text--color--on-status--danger--default);
+}
+
+.diff-hunk {
+    background: var(--pf-t--global--color--status--info--default);
+    color: var(--pf-t--global--text--color--on-status--info--default);
+}
+
+.key-fingerprint {
+    font-family: var(--pf-t--global--font--family--mono);
+    font-size: var(--pf-t--global--font--size--sm);
+}

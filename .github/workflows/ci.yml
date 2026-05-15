@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        node-version: [18, 20, 22]
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y make gettext
+
+      - name: Install npm dependencies
+        run: npm install --ignore-scripts
+
+      - name: Fetch Cockpit build libraries
+        run: make pkg/lib/cockpit-po-plugin.js
+
+      - name: Build
+        run: NODE_ENV=production ./build.js
+
+      - name: Verify dist output
+        run: |
+          test -f dist/manifest.json
+          test -f dist/index.html
+          test -f dist/index.js
+          test -f dist/index.css
+
+      - name: Upload build artifact
+        if: matrix.node-version == 22
+        uses: actions/upload-artifact@v4
+        with:
+          name: cockpit-git-server-dist
+          path: dist/
+
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install npm dependencies
+        run: npm install --ignore-scripts
+
+      - name: ESLint
+        run: npm run eslint
+
+      - name: Stylelint
+        run: npm run stylelint
