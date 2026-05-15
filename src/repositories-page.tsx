@@ -33,6 +33,9 @@ export const RepositoriesPage = () => {
     const [createError, setCreateError] = useState("");
     const [creating, setCreating] = useState(false);
 
+    // Just-created info
+    const [justCreated, setJustCreated] = useState<{ name: string; path: string } | null>(null);
+
     // Delete modal
     const [deleteRepo, setDeleteRepo] = useState<RepoInfo | null>(null);
     const [deleting, setDeleting] = useState(false);
@@ -105,8 +108,9 @@ export const RepositoriesPage = () => {
         cockpit.spawn(["git", "init", "--bare", repoPath], { superuser: "require" })
                 .then(() => {
                     setShowCreate(false);
-                    setNewRepoName("");
                     setCreating(false);
+                    setJustCreated({ name: name.endsWith(".git") ? name : name + ".git", path: repoPath });
+                    setNewRepoName("");
                     loadRepos();
                 })
                 .catch((ex: cockpit.BasicError) => {
@@ -156,6 +160,37 @@ export const RepositoriesPage = () => {
             </div>
 
             {error && <Alert variant="danger" title={error} isInline />}
+
+            {justCreated && (
+                <Card style={{ marginBottom: "1rem" }}>
+                    <CardTitle>
+                        {cockpit.format(_("Repository $0 created successfully"), justCreated.name)}
+                        <Button variant="plain" onClick={() => setJustCreated(null)} style={{ float: "right" }}>✕</Button>
+                    </CardTitle>
+                    <CardBody>
+                        <p style={{ marginBottom: "1rem" }}><strong>{_("Quick setup — clone URL:")}</strong></p>
+                        <pre className="clone-url" style={{ padding: "0.5rem", marginBottom: "1rem" }}>git@{hostname}:{justCreated.path}</pre>
+
+                        <p><strong>{_("…or create a new repository on the command line")}</strong></p>
+                        <pre style={{ background: "var(--pf-t--global--background--color--secondary--default)", padding: "0.75rem", borderRadius: "var(--pf-t--global--border--radius--small)", marginBottom: "1rem", whiteSpace: "pre-wrap" }}>
+{`echo "# ${justCreated.name.replace(/\.git$/, "")}" >> README.md
+git init
+git add README.md
+git commit -m "first commit"
+git branch -M main
+git remote add origin git@${hostname}:${justCreated.path}
+git push -u origin main`}
+                        </pre>
+
+                        <p><strong>{_("…or push an existing repository from the command line")}</strong></p>
+                        <pre style={{ background: "var(--pf-t--global--background--color--secondary--default)", padding: "0.75rem", borderRadius: "var(--pf-t--global--border--radius--small)", whiteSpace: "pre-wrap" }}>
+{`git remote add origin git@${hostname}:${justCreated.path}
+git branch -M main
+git push -u origin main`}
+                        </pre>
+                    </CardBody>
+                </Card>
+            )}
 
             {repos.length === 0
                 ? (

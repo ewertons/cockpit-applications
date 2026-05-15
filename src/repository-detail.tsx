@@ -106,6 +106,33 @@ export const RepositoryDetail = ({ repoName }: RepositoryDetailProps) => {
                 </CardBody>
             </Card>
 
+            {branches.length === 0 && (
+                <Card style={{ marginBottom: "1rem" }}>
+                    <CardTitle>{_("This repository is empty")}</CardTitle>
+                    <CardBody>
+                        <p style={{ marginBottom: "1rem" }}>{_("Get started by pushing code to this repository:")}</p>
+
+                        <p><strong>{_("…or create a new repository on the command line")}</strong></p>
+                        <pre style={{ background: "var(--pf-t--global--background--color--secondary--default)", padding: "0.75rem", borderRadius: "var(--pf-t--global--border--radius--small)", marginBottom: "1rem", whiteSpace: "pre-wrap" }}>
+{`echo "# ${repoName.replace(/\.git$/, "")}" >> README.md
+git init
+git add README.md
+git commit -m "first commit"
+git branch -M main
+git remote add origin git@${hostname}:${repoPath}
+git push -u origin main`}
+                        </pre>
+
+                        <p><strong>{_("…or push an existing repository from the command line")}</strong></p>
+                        <pre style={{ background: "var(--pf-t--global--background--color--secondary--default)", padding: "0.75rem", borderRadius: "var(--pf-t--global--border--radius--small)", whiteSpace: "pre-wrap" }}>
+{`git remote add origin git@${hostname}:${repoPath}
+git branch -M main
+git push -u origin main`}
+                        </pre>
+                    </CardBody>
+                </Card>
+            )}
+
             <Tabs activeKey={activeTab} onSelect={(_e, key) => setActiveTab(key as number)}>
                 <Tab eventKey={0} title={<TabTitleText>{_("Branches")} ({branches.length})</TabTitleText>}>
                     <Card>
