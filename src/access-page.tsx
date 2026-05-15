@@ -70,7 +70,7 @@ export const AccessPage = () => {
                 .then(() => setGitoliteDetected(true))
                 .catch(() => setGitoliteDetected(false));
 
-        cockpit.file(AUTH_KEYS_PATH).read()
+        cockpit.file(AUTH_KEYS_PATH, { superuser: true }).read()
                 .then((content: string) => {
                     setRawContent(content || "");
                     setKeys(parseAuthorizedKeys(content || ""));
@@ -110,12 +110,16 @@ export const AccessPage = () => {
 
         const newContent = rawContent ? rawContent.trimEnd() + "\n" + newLine + "\n" : newLine + "\n";
 
-        // Ensure .ssh directory exists first
-        cockpit.spawn(["mkdir", "-p", "/srv/git/.ssh"], { superuser: "require" })
-                .then(() => cockpit.spawn(["chmod", "700", "/srv/git/.ssh"], { superuser: "require" }))
-                .then(() => cockpit.file(AUTH_KEYS_PATH, { superuser: true }).replace(newContent))
-                .then(() => cockpit.spawn(["chmod", "600", AUTH_KEYS_PATH], { superuser: "require" }))
-                .then(() => cockpit.spawn(["chown", "-R", "git:git", "/srv/git/.ssh"], { superuser: "require" }))
+        // Ensure .ssh directory exists first, detect owner of /srv/git
+        cockpit.spawn(["stat", "-c", "%U:%G", "/srv/git"], { superuser: "require" })
+                .then(owner => {
+                    const gitOwner = owner.trim();
+                    return cockpit.spawn(["mkdir", "-p", "/srv/git/.ssh"], { superuser: "require" })
+                            .then(() => cockpit.spawn(["chmod", "700", "/srv/git/.ssh"], { superuser: "require" }))
+                            .then(() => cockpit.file(AUTH_KEYS_PATH, { superuser: true }).replace(newContent))
+                            .then(() => cockpit.spawn(["chmod", "600", AUTH_KEYS_PATH], { superuser: "require" }))
+                            .then(() => cockpit.spawn(["chown", "-R", gitOwner, "/srv/git/.ssh"], { superuser: "require" }));
+                })
                 .then(() => {
                     setShowAdd(false);
                     setNewKeyContent("");
@@ -143,8 +147,6 @@ export const AccessPage = () => {
 
     return (
         <>
-            <CardTitle>{_("Access Control")}</CardTitle>
-
             {gitoliteDetected && (
                 <Alert variant="info" title={_("Gitolite detected")} isInline style={{ marginBottom: "1rem" }}>
                     {_("Gitolite is installed at /srv/git/.gitolite. Access may be managed by Gitolite in addition to authorized_keys.")}

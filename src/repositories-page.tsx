@@ -7,7 +7,8 @@ import { TextInput } from "@patternfly/react-core/dist/esm/components/TextInput/
 import { FormGroup } from "@patternfly/react-core/dist/esm/components/Form/index.js";
 import { Alert } from "@patternfly/react-core/dist/esm/components/Alert/index.js";
 import { Spinner } from "@patternfly/react-core/dist/esm/components/Spinner/index.js";
-import { DescriptionList, DescriptionListDescription, DescriptionListGroup, DescriptionListTerm } from "@patternfly/react-core/dist/esm/components/DescriptionList/index.js";
+import { ClipboardCopy } from "@patternfly/react-core/dist/esm/components/ClipboardCopy/index.js";
+import { SearchInput } from "@patternfly/react-core/dist/esm/components/SearchInput/index.js";
 
 import cockpit from 'cockpit';
 
@@ -26,6 +27,7 @@ export const RepositoriesPage = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [hostname, setHostname] = useState("localhost");
+    const [filter, setFilter] = useState("");
 
     // Create modal
     const [showCreate, setShowCreate] = useState(false);
@@ -106,6 +108,7 @@ export const RepositoriesPage = () => {
         setCreateError("");
 
         cockpit.spawn(["git", "init", "--bare", repoPath], { superuser: "require" })
+                .then(() => cockpit.spawn(["chown", "-R", "git:git", repoPath], { superuser: "require", err: "ignore" }))
                 .then(() => {
                     setShowCreate(false);
                     setCreating(false);
@@ -151,7 +154,15 @@ export const RepositoriesPage = () => {
     return (
         <>
             <div className="repo-header">
-                <CardTitle>{_("Git Repositories")}</CardTitle>
+                {repos.length > 0 && (
+                    <SearchInput
+                        placeholder={_("Filter repositories…")}
+                        value={filter}
+                        onChange={(_e, val) => setFilter(val)}
+                        onClear={() => setFilter("")}
+                        style={{ maxWidth: "300px" }}
+                    />
+                )}
                 {repos.length > 0 && (
                     <Button variant="primary" onClick={() => setShowCreate(true)}>
                         {_("Create Repository")}
@@ -169,9 +180,9 @@ export const RepositoriesPage = () => {
                     </CardTitle>
                     <CardBody>
                         <p style={{ marginBottom: "1rem" }}><strong>{_("Quick setup — clone URL:")}</strong></p>
-                        <pre className="clone-url" style={{ padding: "0.5rem", marginBottom: "1rem" }}>git@{hostname}:{justCreated.path}</pre>
+                        <ClipboardCopy isReadOnly>{`git@${hostname}:${justCreated.path}`}</ClipboardCopy>
 
-                        <p><strong>{_("…or create a new repository on the command line")}</strong></p>
+                        <p style={{ marginTop: "1rem" }}><strong>{_("…or create a new repository on the command line")}</strong></p>
                         <pre style={{ background: "var(--pf-t--global--background--color--secondary--default)", padding: "0.75rem", borderRadius: "var(--pf-t--global--border--radius--small)", marginBottom: "1rem", whiteSpace: "pre-wrap" }}>
 {`echo "# ${justCreated.name.replace(/\.git$/, "")}" >> README.md
 git init
@@ -207,41 +218,33 @@ git push -u origin main`}
                         </EmptyStateFooter>
                     </EmptyState>
                 )
-                : repos.map(repo => (
-                    <Card key={repo.name} isCompact style={{ marginBottom: "1rem" }}>
-                        <CardTitle>
-                            <Button variant="link" onClick={() => navigateToRepo(repo)}>
-                                {repo.name}
-                            </Button>
-                        </CardTitle>
-                        <CardBody>
-                            <DescriptionList isHorizontal isCompact>
-                                <DescriptionListGroup>
-                                    <DescriptionListTerm>{_("Clone URL")}</DescriptionListTerm>
-                                    <DescriptionListDescription>
-                                        <span className="clone-url">git@{hostname}:{repo.path}</span>
-                                    </DescriptionListDescription>
-                                </DescriptionListGroup>
-                                <DescriptionListGroup>
-                                    <DescriptionListTerm>{_("Size")}</DescriptionListTerm>
-                                    <DescriptionListDescription>{repo.size}</DescriptionListDescription>
-                                </DescriptionListGroup>
-                                <DescriptionListGroup>
-                                    <DescriptionListTerm>{_("Last Modified")}</DescriptionListTerm>
-                                    <DescriptionListDescription>{repo.lastModified}</DescriptionListDescription>
-                                </DescriptionListGroup>
-                            </DescriptionList>
-                            <div style={{ marginTop: "0.5rem" }}>
-                                <Button variant="secondary" onClick={() => navigateToBrowse(repo)} style={{ marginRight: "0.5rem" }}>
-                                    {_("Browse")}
-                                </Button>
-                                <Button variant="danger" onClick={() => setDeleteRepo(repo)}>
-                                    {_("Delete")}
-                                </Button>
-                            </div>
-                        </CardBody>
-                    </Card>
-                ))}
+                : repos
+                    .filter(repo => !filter || repo.name.toLowerCase().includes(filter.toLowerCase()))
+                    .map(repo => (
+                        <Card key={repo.name} isCompact isFlat style={{ marginBottom: "0.5rem", padding: "0.5rem" }}>
+                            <CardBody style={{ padding: "0.5rem" }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                    <div style={{ flex: 1 }}>
+                                        <Button variant="link" isInline onClick={() => navigateToRepo(repo)} style={{ fontWeight: "bold" }}>
+                                            {repo.name}
+                                        </Button>
+                                        <span style={{ marginLeft: "1rem", fontSize: "small", color: "var(--pf-t--global--text--color--subtle)" }}>
+                                            {repo.size} · {repo.lastModified}
+                                        </span>
+                                    </div>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                        <ClipboardCopy isReadOnly variant="inline-compact">{`git@${hostname}:${repo.path}`}</ClipboardCopy>
+                                        <Button variant="secondary" size="sm" onClick={() => navigateToBrowse(repo)}>
+                                            {_("Browse")}
+                                        </Button>
+                                        <Button variant="danger" size="sm" onClick={() => setDeleteRepo(repo)}>
+                                            {_("Delete")}
+                                        </Button>
+                                    </div>
+                                </div>
+                            </CardBody>
+                        </Card>
+                    ))}
 
             {showCreate && (
                 <Modal variant="small" isOpen onClose={() => { setShowCreate(false); setCreateError("") }}>

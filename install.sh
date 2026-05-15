@@ -73,6 +73,20 @@ else
     rm -rf "$DEST"
     mkdir -p "$DEST"
     cp -r dist/* "$DEST/"
+
+    # Create the 'git' system user and /srv/git if they don't exist
+    echo "==> Setting up git system user and repository directory..."
+    if ! id -u git &>/dev/null; then
+        useradd -r -m -d /srv/git -s /usr/bin/git-shell git
+        echo "    Created system user 'git' with home /srv/git"
+    fi
+    if [[ ! -d /srv/git ]]; then
+        mkdir -p /srv/git
+        chown git:git /srv/git
+    fi
+    # Ensure /srv/git is owned by git
+    chown git:git /srv/git
+    chmod 755 /srv/git
 fi
 
 echo "==> Done. Reload Cockpit in your browser to see 'Git Server' in the menu."

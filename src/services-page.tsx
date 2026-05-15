@@ -228,8 +228,6 @@ export const ServicesPage = () => {
 
     return (
         <>
-            <CardTitle>{_("Service Management")}</CardTitle>
-
             {error && <Alert variant="danger" title={error} isInline style={{ marginBottom: "1rem" }} />}
 
             {services.map(svc => (
