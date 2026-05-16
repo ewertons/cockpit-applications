@@ -26,9 +26,10 @@ jobs:
 
       # https://github.blog/2022-04-12-git-security-vulnerability-announced/
       - name: Pacify git's permission check
-        run: git config --global --add safe.directory /__w/cockpit-git-server/cockpit-git-server
+        run: git config --global --add safe.directory /__w/cockpit-applications/cockpit-applications
 
       - name: Run tasks-container-update
+        working-directory: cockpit-git-server
         run: |
           make bots
           bots/tasks-container-update

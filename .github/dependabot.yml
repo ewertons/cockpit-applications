@@ -1,7 +1,7 @@
 version: 2
 updates:
   - package-ecosystem: "npm"
-    directory: "/"
+    directory: "/cockpit-git-server"
     schedule:
       interval: "daily"
       # run these when most of our developers don't work, don't DoS our CI over the day

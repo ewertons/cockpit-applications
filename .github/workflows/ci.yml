@@ -9,6 +9,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: cockpit-git-server
     strategy:
       matrix:
         node-version: [20, 22]
@@ -45,10 +48,13 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: cockpit-git-server-dist
-          path: dist/
+          path: cockpit-git-server/dist/
 
   lint:
     runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: cockpit-git-server
     steps:
       - name: Clone repository
         uses: actions/checkout@v6

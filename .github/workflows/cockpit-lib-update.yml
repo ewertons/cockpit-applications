@@ -25,6 +25,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run cockpit-lib-update
+        working-directory: cockpit-git-server
         run: |
           make bots
           bots/cockpit-lib-update
