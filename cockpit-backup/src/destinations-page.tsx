@@ -67,7 +67,7 @@ function getEnvVarHints(type: string): { key: string; label: string; secret: boo
     }
 }
 
-export const DestinationsPage = ({ destinationId }: DestinationsPageProps) => {
+export const DestinationsPage = ({ destinationId: _destinationId }: DestinationsPageProps) => {
     const [destinations, setDestinations] = useState<Destination[]>([]);
     const [loading, setLoading] = useState(true);
     const [showDialog, setShowDialog] = useState(false);
@@ -170,55 +170,57 @@ export const DestinationsPage = ({ destinationId }: DestinationsPageProps) => {
                             </div>
                         </div>
                         <div className="destination-cards">
-                        {destinations.map(dest => {
-                            const typeInfo = DEST_TYPES.find(t => t.value === dest.type);
-                            return (
-                                <Card key={dest.id} isCompact>
-                                    <CardTitle>
-                                        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                                            <span style={{ fontWeight: "bold" }}>{dest.name}</span>
-                                            <Label color={dest.initialized ? "green" : "orange"}>
-                                                {typeInfo?.label || dest.type}
-                                            </Label>
-                                        </div>
-                                    </CardTitle>
-                                    <CardBody>
-                                        <DescriptionList isCompact>
-                                            <DescriptionListGroup>
-                                                <DescriptionListTerm>{_("Repository")}</DescriptionListTerm>
-                                                <DescriptionListDescription>
-                                                    <span className="dest-path">{dest.path}</span>
-                                                </DescriptionListDescription>
-                                            </DescriptionListGroup>
-                                            <DescriptionListGroup>
-                                                <DescriptionListTerm>{_("Status")}</DescriptionListTerm>
-                                                <DescriptionListDescription>
-                                                    {dest.initialized
-                                                        ? <Label color="green">{_("Initialized")}</Label>
-                                                        : <Label color="orange">{_("Not initialized")}</Label>}
-                                                </DescriptionListDescription>
-                                            </DescriptionListGroup>
-                                            {typeInfo && (
+                            {destinations.map(dest => {
+                                const typeInfo = DEST_TYPES.find(t => t.value === dest.type);
+                                return (
+                                    <Card key={dest.id} isCompact>
+                                        <CardTitle>
+                                            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                                                <span style={{ fontWeight: "bold" }}>{dest.name}</span>
+                                                <Label color={dest.initialized ? "green" : "orange"}>
+                                                    {typeInfo?.label || dest.type}
+                                                </Label>
+                                            </div>
+                                        </CardTitle>
+                                        <CardBody>
+                                            <DescriptionList isCompact>
                                                 <DescriptionListGroup>
-                                                    <DescriptionListTerm>{_("Type")}</DescriptionListTerm>
-                                                    <DescriptionListDescription>{typeInfo.description}</DescriptionListDescription>
+                                                    <DescriptionListTerm>{_("Repository")}</DescriptionListTerm>
+                                                    <DescriptionListDescription>
+                                                        <span className="dest-path">{dest.path}</span>
+                                                    </DescriptionListDescription>
                                                 </DescriptionListGroup>
-                                            )}
-                                        </DescriptionList>
+                                                <DescriptionListGroup>
+                                                    <DescriptionListTerm>{_("Status")}</DescriptionListTerm>
+                                                    <DescriptionListDescription>
+                                                        {dest.initialized
+                                                            ? <Label color="green">{_("Initialized")}</Label>
+                                                            : <Label color="orange">{_("Not initialized")}</Label>}
+                                                    </DescriptionListDescription>
+                                                </DescriptionListGroup>
+                                                {typeInfo && (
+                                                    <DescriptionListGroup>
+                                                        <DescriptionListTerm>{_("Type")}</DescriptionListTerm>
+                                                        <DescriptionListDescription>{typeInfo.description}</DescriptionListDescription>
+                                                    </DescriptionListGroup>
+                                                )}
+                                            </DescriptionList>
 
-                                        <div style={{ marginTop: "1rem", display: "flex", gap: "0.5rem" }}>
-                                            <Button variant="secondary" size="sm" onClick={() => handleCheck(dest)}
-                                                isLoading={checkingId === dest.id} isDisabled={checkingId === dest.id}>
-                                                {_("Check Integrity")}
-                                            </Button>
-                                            <Button variant="danger" size="sm" onClick={() => setDeleteTarget(dest)}>
-                                                {_("Remove")}
-                                            </Button>
-                                        </div>
-                                    </CardBody>
-                                </Card>
-                            );
-                        })}
+                                            <div style={{ marginTop: "1rem", display: "flex", gap: "0.5rem" }}>
+                                                <Button
+variant="secondary" size="sm" onClick={() => handleCheck(dest)}
+                                                isLoading={checkingId === dest.id} isDisabled={checkingId === dest.id}
+                                                >
+                                                    {_("Check Integrity")}
+                                                </Button>
+                                                <Button variant="danger" size="sm" onClick={() => setDeleteTarget(dest)}>
+                                                    {_("Remove")}
+                                                </Button>
+                                            </div>
+                                        </CardBody>
+                                    </Card>
+                                );
+                            })}
                         </div>
                     </>
                 )}
@@ -315,10 +317,14 @@ function DestinationDialog({ onSave, onClose }: DestinationDialogProps) {
             <ModalHeader title={_("Add Backup Destination")} />
             <ModalBody>
                 <div className="job-form">
-                    <FormGroup label={_("Name")} isRequired fieldId="dest-name"
-                        helperText={_("A friendly name for this destination")}>
-                        <TextInput id="dest-name" value={name} onChange={(_ev, val) => setName(val)}
-                            placeholder={_("External Drive")} />
+                    <FormGroup
+label={_("Name")} isRequired fieldId="dest-name"
+                        helperText={_("A friendly name for this destination")}
+                    >
+                        <TextInput
+id="dest-name" value={name} onChange={(_ev, val) => setName(val)}
+                            placeholder={_("External Drive")}
+                        />
                     </FormGroup>
 
                     <FormGroup label={_("Storage Type")} isRequired fieldId="dest-type">
@@ -329,32 +335,44 @@ function DestinationDialog({ onSave, onClose }: DestinationDialogProps) {
                         </FormSelect>
                     </FormGroup>
 
-                    <FormGroup label={_("Repository Path")} isRequired fieldId="dest-path"
-                        helperText={cockpit.format(_("Full restic repository URI for $0"), DEST_TYPES.find(t => t.value === type)?.label || type)}>
-                        <TextInput id="dest-path" value={path} onChange={(_ev, val) => setPath(val)}
-                            placeholder={getRepoPlaceholder(type)} />
+                    <FormGroup
+label={_("Repository Path")} isRequired fieldId="dest-path"
+                        helperText={cockpit.format(_("Full restic repository URI for $0"), DEST_TYPES.find(t => t.value === type)?.label || type)}
+                    >
+                        <TextInput
+id="dest-path" value={path} onChange={(_ev, val) => setPath(val)}
+                            placeholder={getRepoPlaceholder(type)}
+                        />
                     </FormGroup>
 
                     {type === 'sftp' && (
                         <Card isFlat isCompact>
                             <CardTitle>{_("SSH Authentication")}</CardTitle>
                             <CardBody>
-                                <FormGroup label={_("SSH Private Key Path")} fieldId="dest-ssh-key"
-                                    helperText={_("Path to the private key used to connect to the remote server.")}>
+                                <FormGroup
+label={_("SSH Private Key Path")} fieldId="dest-ssh-key"
+                                    helperText={_("Path to the private key used to connect to the remote server.")}
+                                >
                                     <div style={{ display: "flex", gap: "0.5rem" }}>
-                                        <TextInput id="dest-ssh-key" value={sshKey}
+                                        <TextInput
+id="dest-ssh-key" value={sshKey}
                                             onChange={(_ev, val) => { setSshKey(val); setSshPubKey('') }}
                                             placeholder="/etc/cockpit-backup/ssh-keys/backup-key"
-                                            style={{ flex: 1 }} />
-                                        <Button variant="secondary" onClick={handleGenerateKey}
-                                            isLoading={generatingKey} isDisabled={generatingKey}>
+                                            style={{ flex: 1 }}
+                                        />
+                                        <Button
+variant="secondary" onClick={handleGenerateKey}
+                                            isLoading={generatingKey} isDisabled={generatingKey}
+                                        >
                                             {_("Generate Key")}
                                         </Button>
                                     </div>
                                 </FormGroup>
                                 {sshPubKey && (
-                                    <FormGroup label={_("Public Key")} fieldId="dest-ssh-pubkey"
-                                        helperText={_("Copy this key and add it to the remote user's authorized keys.")}>
+                                    <FormGroup
+label={_("Public Key")} fieldId="dest-ssh-pubkey"
+                                        helperText={_("Copy this key and add it to the remote user's authorized keys.")}
+                                    >
                                         <ClipboardCopy isReadOnly hoverTip={_("Copy")} clickTip={_("Copied")}>
                                             {sshPubKey}
                                         </ClipboardCopy>
@@ -364,27 +382,39 @@ function DestinationDialog({ onSave, onClose }: DestinationDialogProps) {
                         </Card>
                     )}
 
-                    <FormGroup label={_("Encryption Password")} isRequired fieldId="dest-password"
-                        helperText={_("Encrypts all backup data. Stored automatically at /etc/cockpit-backup/passwords/ — but save a copy somewhere safe as a backup.")}>
+                    <FormGroup
+label={_("Encryption Password")} isRequired fieldId="dest-password"
+                        helperText={_("Encrypts all backup data. Stored automatically at /etc/cockpit-backup/passwords/ — but save a copy somewhere safe as a backup.")}
+                    >
                         <div style={{ display: "flex", gap: "0.5rem" }}>
-                            <TextInput id="dest-password" type="password" value={password}
-                                onChange={(_ev, val) => setPassword(val)} style={{ flex: 1 }} />
-                            <Button variant="secondary" onClick={() => {
-                                const arr = new Uint8Array(24);
-                                crypto.getRandomValues(arr);
-                                const generated = btoa(String.fromCharCode(...arr)).replace(/[/+=]/g, '').slice(0, 32);
-                                setPassword(generated);
-                                setPasswordConfirm(generated);
-                            }}>{_("Generate")}</Button>
+                            <TextInput
+id="dest-password" type="password" value={password}
+                                onChange={(_ev, val) => setPassword(val)} style={{ flex: 1 }}
+                            />
+                            <Button
+variant="secondary" onClick={() => {
+    const arr = new Uint8Array(24);
+    crypto.getRandomValues(arr);
+    const generated = btoa(String.fromCharCode(...arr)).replace(/[/+=]/g, '')
+            .slice(0, 32);
+    setPassword(generated);
+    setPasswordConfirm(generated);
+}}
+                            >{_("Generate")}
+                            </Button>
                         </div>
                     </FormGroup>
 
-                    <FormGroup label={_("Confirm Password")} isRequired fieldId="dest-password-confirm"
+                    <FormGroup
+label={_("Confirm Password")} isRequired fieldId="dest-password-confirm"
                         validated={passwordMismatch ? "error" : "default"}
-                        helperTextInvalid={_("Passwords do not match")}>
-                        <TextInput id="dest-password-confirm" type="password" value={passwordConfirm}
+                        helperTextInvalid={_("Passwords do not match")}
+                    >
+                        <TextInput
+id="dest-password-confirm" type="password" value={passwordConfirm}
                             onChange={(_ev, val) => setPasswordConfirm(val)}
-                            validated={passwordMismatch ? "error" : "default"} />
+                            validated={passwordMismatch ? "error" : "default"}
+                        />
                     </FormGroup>
 
                     {envHints.length > 0 && (

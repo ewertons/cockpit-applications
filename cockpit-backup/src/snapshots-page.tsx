@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Button } from "@patternfly/react-core/dist/esm/components/Button/index.js";
-import { Card, CardBody, CardTitle } from "@patternfly/react-core/dist/esm/components/Card/index.js";
+import { Card, CardBody } from "@patternfly/react-core/dist/esm/components/Card/index.js";
 import { DescriptionList, DescriptionListDescription, DescriptionListGroup, DescriptionListTerm } from "@patternfly/react-core/dist/esm/components/DescriptionList/index.js";
 import { EmptyState, EmptyStateBody, EmptyStateFooter, EmptyStateActions } from "@patternfly/react-core/dist/esm/components/EmptyState/index.js";
 import { FormGroup } from "@patternfly/react-core/dist/esm/components/Form/index.js";
@@ -24,7 +24,7 @@ interface SnapshotsPageProps {
     snapshotId?: string;
 }
 
-export const SnapshotsPage = ({ snapshotId }: SnapshotsPageProps) => {
+export const SnapshotsPage = ({ snapshotId: _snapshotId }: SnapshotsPageProps) => {
     const [snapshots, setSnapshots] = useState<ResticSnapshot[]>([]);
     const [destinations, setDestinations] = useState<Destination[]>([]);
     const [loading, setLoading] = useState(true);
@@ -145,55 +145,55 @@ export const SnapshotsPage = ({ snapshotId }: SnapshotsPageProps) => {
                             </div>
                         </div>
                         <div className="snapshot-cards">
-                        {filtered.map(snap => {
-                            const time = formatTime(snap.time);
-                            return (
-                                <Card key={snap.id} isCompact isFlat style={{ padding: "0.5rem" }}>
-                                    <CardBody style={{ padding: "0.5rem" }}>
-                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                                            <div style={{ flex: 1 }}>
-                                                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.5rem" }}>
-                                                    <Label color="blue" style={{ fontFamily: "var(--pf-t--global--font--family--mono)" }}>
-                                                        {snap.short_id}
-                                                    </Label>
-                                                    <span title={time.full} className="snapshot-time">
-                                                        {time.full}
-                                                    </span>
-                                                    <span className="snapshot-time">({time.relative})</span>
-                                                    {snap.tags && snap.tags.map(tag => (
-                                                        <Label key={tag} color="purple">{tag}</Label>
-                                                    ))}
+                            {filtered.map(snap => {
+                                const time = formatTime(snap.time);
+                                return (
+                                    <Card key={snap.id} isCompact isFlat style={{ padding: "0.5rem" }}>
+                                        <CardBody style={{ padding: "0.5rem" }}>
+                                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                                                <div style={{ flex: 1 }}>
+                                                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.5rem" }}>
+                                                        <Label color="blue" style={{ fontFamily: "var(--pf-t--global--font--family--mono)" }}>
+                                                            {snap.short_id}
+                                                        </Label>
+                                                        <span title={time.full} className="snapshot-time">
+                                                            {time.full}
+                                                        </span>
+                                                        <span className="snapshot-time">({time.relative})</span>
+                                                        {snap.tags && snap.tags.map(tag => (
+                                                            <Label key={tag} color="purple">{tag}</Label>
+                                                        ))}
+                                                    </div>
+
+                                                    <DescriptionList isHorizontal isCompact>
+                                                        <DescriptionListGroup>
+                                                            <DescriptionListTerm>{_("Paths")}</DescriptionListTerm>
+                                                            <DescriptionListDescription>
+                                                                <span style={{ fontFamily: "var(--pf-t--global--font--family--mono)", fontSize: "var(--pf-t--global--font--size--sm)" }}>
+                                                                    {snap.paths.join(', ')}
+                                                                </span>
+                                                            </DescriptionListDescription>
+                                                        </DescriptionListGroup>
+                                                        <DescriptionListGroup>
+                                                            <DescriptionListTerm>{_("Host")}</DescriptionListTerm>
+                                                            <DescriptionListDescription>{snap.hostname}</DescriptionListDescription>
+                                                        </DescriptionListGroup>
+                                                    </DescriptionList>
                                                 </div>
 
-                                                <DescriptionList isHorizontal isCompact>
-                                                    <DescriptionListGroup>
-                                                        <DescriptionListTerm>{_("Paths")}</DescriptionListTerm>
-                                                        <DescriptionListDescription>
-                                                            <span style={{ fontFamily: "var(--pf-t--global--font--family--mono)", fontSize: "var(--pf-t--global--font--size--sm)" }}>
-                                                                {snap.paths.join(', ')}
-                                                            </span>
-                                                        </DescriptionListDescription>
-                                                    </DescriptionListGroup>
-                                                    <DescriptionListGroup>
-                                                        <DescriptionListTerm>{_("Host")}</DescriptionListTerm>
-                                                        <DescriptionListDescription>{snap.hostname}</DescriptionListDescription>
-                                                    </DescriptionListGroup>
-                                                </DescriptionList>
+                                                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                                    <Button variant="primary" size="sm" onClick={() => setRestoreTarget(snap)}>
+                                                        {_("Restore")}
+                                                    </Button>
+                                                    <Button variant="danger" size="sm" onClick={() => setDeleteTarget(snap)}>
+                                                        {_("Delete")}
+                                                    </Button>
+                                                </div>
                                             </div>
-
-                                            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                                                <Button variant="primary" size="sm" onClick={() => setRestoreTarget(snap)}>
-                                                    {_("Restore")}
-                                                </Button>
-                                                <Button variant="danger" size="sm" onClick={() => setDeleteTarget(snap)}>
-                                                    {_("Delete")}
-                                                </Button>
-                                            </div>
-                                        </div>
-                                    </CardBody>
-                                </Card>
-                            );
-                        })}
+                                        </CardBody>
+                                    </Card>
+                                );
+                            })}
                         </div>
                     </>
                 )}
@@ -302,19 +302,27 @@ function RestoreDialog({ snapshot, destinations, onClose, onDone }: RestoreDialo
                     </DescriptionListGroup>
                 </DescriptionList>
 
-                <FormGroup label={_("Restore Target Directory")} fieldId="restore-target"
-                    helperText={_("Where to restore files. Use '/' to restore to original locations.")}>
+                <FormGroup
+label={_("Restore Target Directory")} fieldId="restore-target"
+                    helperText={_("Where to restore files. Use '/' to restore to original locations.")}
+                >
                     <TextInput id="restore-target" value={target} onChange={(_ev, val) => setTarget(val)} />
                 </FormGroup>
 
-                <FormGroup label={_("Include Paths (optional)")} fieldId="restore-include"
-                    helperText={_("Only restore these paths, one per line. Leave empty to restore everything.")}>
-                    <TextArea id="restore-include" value={include} onChange={(_ev, val) => setInclude(val)} rows={3}
-                        placeholder={"/home/user/documents\n/etc/nginx"} />
+                <FormGroup
+label={_("Include Paths (optional)")} fieldId="restore-include"
+                    helperText={_("Only restore these paths, one per line. Leave empty to restore everything.")}
+                >
+                    <TextArea
+id="restore-include" value={include} onChange={(_ev, val) => setInclude(val)} rows={3}
+                        placeholder={"/home/user/documents\n/etc/nginx"}
+                    />
                 </FormGroup>
 
-                <FormGroup label={_("Exclude Paths (optional)")} fieldId="restore-exclude"
-                    helperText={_("Skip these paths during restore, one per line")}>
+                <FormGroup
+label={_("Exclude Paths (optional)")} fieldId="restore-exclude"
+                    helperText={_("Skip these paths during restore, one per line")}
+                >
                     <TextArea id="restore-exclude" value={exclude} onChange={(_ev, val) => setExclude(val)} rows={3} />
                 </FormGroup>
             </ModalBody>

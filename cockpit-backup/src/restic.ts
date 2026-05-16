@@ -46,7 +46,7 @@ export interface ForgetPolicy {
     keep_weekly?: number;
     keep_monthly?: number;
     keep_yearly?: number;
-    keep_within?: string;  // e.g. "30d"
+    keep_within?: string; // e.g. "30d"
 }
 
 export interface BackupJob {
@@ -61,7 +61,7 @@ export interface BackupJob {
     exclude_larger_than?: string;
     exclude_caches: boolean;
     tags: string[];
-    schedule?: string;  // systemd OnCalendar format
+    schedule?: string; // systemd OnCalendar format
     retention?: ForgetPolicy;
     enabled: boolean;
     one_file_system: boolean;
@@ -71,10 +71,10 @@ export interface Destination {
     id: string;
     name: string;
     type: "local" | "sftp" | "rest" | "s3" | "azure" | "gcs" | "b2";
-    path: string;  // full restic repo URI
+    path: string; // full restic repo URI
     password_file: string;
-    env_vars?: Record<string, string>;  // cloud credentials env vars
-    ssh_key?: string;  // path to SSH private key (for sftp destinations)
+    env_vars?: Record<string, string>; // cloud credentials env vars
+    ssh_key?: string; // path to SSH private key (for sftp destinations)
     initialized: boolean;
 }
 
@@ -126,7 +126,7 @@ function resticCmd(args: string[], repo: string, passwordFile: string, envVars?:
 
     const cmd = ["env", ...env, "restic", ...extraArgs, ...args];
     return cockpit.spawn(cmd, { superuser: "try", err: "message" })
-        .then((output: string) => output);
+            .then((output: string) => output);
 }
 
 // Initialize a new restic repository
@@ -512,9 +512,9 @@ WantedBy=timers.target
 `;
 
     await cockpit.file(`${SYSTEMD_DIR}/${serviceName}.service`, { superuser: "try" })
-        .replace(serviceContent);
+            .replace(serviceContent);
     await cockpit.file(`${SYSTEMD_DIR}/${serviceName}.timer`, { superuser: "try" })
-        .replace(timerContent);
+            .replace(timerContent);
 
     await cockpit.spawn(["systemctl", "daemon-reload"], { superuser: "try" });
     await cockpit.spawn(["systemctl", "enable", "--now", `${serviceName}.timer`], { superuser: "try" });

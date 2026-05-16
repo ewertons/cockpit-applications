@@ -44,7 +44,7 @@ export function BackupProvider({ children }: { children: React.ReactNode }) {
     const journalProcs = useRef<Record<string, any>>({});
 
     // Monitor a running backup unit via journalctl
-    const monitorUnit = useCallback((jobId: string, jobName: string) => {
+    const monitorUnit = useCallback((jobId: string, _jobName: string) => {
         // Avoid double-monitoring
         if (journalProcs.current[jobId]) return;
 
@@ -85,6 +85,7 @@ export function BackupProvider({ children }: { children: React.ReactNode }) {
         // When journal stream ends, check if the unit finished
         proc.then(() => checkUnitFinished(jobId));
         proc.catch(() => checkUnitFinished(jobId));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // Poll for unit completion (since journal stream may end before we get the result)
@@ -92,7 +93,7 @@ export function BackupProvider({ children }: { children: React.ReactNode }) {
         delete journalProcs.current[jobId];
 
         // Small delay to let systemd finalize the unit state
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
         const still = await isBackupUnitRunning(jobId);
         if (still) {
@@ -134,8 +135,9 @@ export function BackupProvider({ children }: { children: React.ReactNode }) {
         })();
 
         // Cleanup journal procs on unmount
+        const currentProcs = journalProcs.current;
         return () => {
-            for (const proc of Object.values(journalProcs.current)) {
+            for (const proc of Object.values(currentProcs)) {
                 try { proc.close() } catch { /* */ }
             }
         };

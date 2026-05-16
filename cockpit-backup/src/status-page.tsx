@@ -7,7 +7,7 @@ import { Label } from "@patternfly/react-core/dist/esm/components/Label/index.js
 import { Progress } from "@patternfly/react-core/dist/esm/components/Progress/index.js";
 import { Alert } from "@patternfly/react-core/dist/esm/components/Alert/index.js";
 import { Spinner } from "@patternfly/react-core/dist/esm/components/Spinner/index.js";
-import { Switch } from "@patternfly/react-core/dist/esm/components/Switch/index.js";
+// import { Switch } from "@patternfly/react-core/dist/esm/components/Switch/index.js";
 
 import cockpit from 'cockpit';
 import { loadJobs, loadDestinations, BackupJob, Destination, getTimerStatus, repoStats, ResticRepoStats, destEnvVars, BACKUP_UNIT_PREFIX } from './restic.js';
@@ -37,7 +37,7 @@ export const StatusPage = () => {
     const [destinations, setDestinations] = useState<Destination[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const { runningBackups, results } = useBackups();
+    const { runningBackups } = useBackups();
 
     const refresh = useCallback(async () => {
         setLoading(true);
@@ -54,11 +54,12 @@ export const StatusPage = () => {
                     // Check both scheduled service and manual run unit
                     const output = await cockpit.spawn(
                         ["systemctl", "is-active",
-                         `cockpit-backup-${job.id}.service`,
-                         `${BACKUP_UNIT_PREFIX}-${job.id}.service`],
+                            `cockpit-backup-${job.id}.service`,
+                            `${BACKUP_UNIT_PREFIX}-${job.id}.service`],
                         { superuser: "try", err: "ignore" }
                     );
-                    running = output.trim().split('\n').some((l: string) => l.trim() === "active" || l.trim() === "activating");
+                    running = output.trim().split('\n')
+                            .some((l: string) => l.trim() === "active" || l.trim() === "activating");
                 } catch { /* not running */ }
 
                 statuses.push({
@@ -104,24 +105,21 @@ export const StatusPage = () => {
 
     if (!hasData) {
         return (
-            <>
-
-                <EmptyState>
-                    <EmptyStateBody>
-                        {_("Welcome to Cockpit Backup! Get started by adding a destination and creating a backup job.")}
-                    </EmptyStateBody>
-                    <EmptyStateFooter>
-                        <EmptyStateActions>
-                            <Button variant="primary" onClick={() => cockpit.location.go(["destinations"])}>
-                                {_("Add Destination")}
-                            </Button>
-                            <Button variant="secondary" onClick={() => cockpit.location.go(["jobs"])}>
-                                {_("Create Backup Job")}
-                            </Button>
-                        </EmptyStateActions>
-                    </EmptyStateFooter>
-                </EmptyState>
-            </>
+            <EmptyState>
+                <EmptyStateBody>
+                    {_("Welcome to Cockpit Backup! Get started by adding a destination and creating a backup job.")}
+                </EmptyStateBody>
+                <EmptyStateFooter>
+                    <EmptyStateActions>
+                        <Button variant="primary" onClick={() => cockpit.location.go(["destinations"])}>
+                            {_("Add Destination")}
+                        </Button>
+                        <Button variant="secondary" onClick={() => cockpit.location.go(["jobs"])}>
+                            {_("Create Backup Job")}
+                        </Button>
+                    </EmptyStateActions>
+                </EmptyStateFooter>
+            </EmptyState>
         );
     }
 

@@ -29,7 +29,7 @@ interface JobsPageProps {
     jobId?: string;
 }
 
-export const JobsPage = ({ jobId }: JobsPageProps) => {
+export const JobsPage = ({ jobId: _jobId }: JobsPageProps) => {
     const [jobs, setJobs] = useState<BackupJob[]>([]);
     const [destinations, setDestinations] = useState<Destination[]>([]);
     const [loading, setLoading] = useState(true);
@@ -146,103 +146,107 @@ export const JobsPage = ({ jobId }: JobsPageProps) => {
                             </div>
                         </div>
                         <div className="job-cards">
-                        {filtered.map(job => (
-                            <Card key={job.id} isCompact isFlat style={{ padding: "0.5rem" }}>
-                                <CardBody style={{ padding: "0.5rem" }}>
-                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                                        <div style={{ flex: 1 }}>
-                                            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.5rem" }}>
-                                                <Button variant="link" isInline onClick={() => handleEdit(job)} style={{ fontWeight: "bold", fontSize: "1.05rem" }}>
-                                                    {job.name}
-                                                </Button>
-                                                {job.enabled
-                                                    ? <Label color="green">{_("Enabled")}</Label>
-                                                    : <Label color="grey">{_("Disabled")}</Label>}
-                                                {timerStatuses[job.id]?.active && <Label color="blue">{_("Scheduled")}</Label>}
-                                            </div>
+                            {filtered.map(job => (
+                                <Card key={job.id} isCompact isFlat style={{ padding: "0.5rem" }}>
+                                    <CardBody style={{ padding: "0.5rem" }}>
+                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                                            <div style={{ flex: 1 }}>
+                                                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.5rem" }}>
+                                                    <Button variant="link" isInline onClick={() => handleEdit(job)} style={{ fontWeight: "bold", fontSize: "1.05rem" }}>
+                                                        {job.name}
+                                                    </Button>
+                                                    {job.enabled
+                                                        ? <Label color="green">{_("Enabled")}</Label>
+                                                        : <Label color="grey">{_("Disabled")}</Label>}
+                                                    {timerStatuses[job.id]?.active && <Label color="blue">{_("Scheduled")}</Label>}
+                                                </div>
 
-                                            <DescriptionList isHorizontal isCompact>
-                                                <DescriptionListGroup>
-                                                    <DescriptionListTerm>{_("Sources")}</DescriptionListTerm>
-                                                    <DescriptionListDescription>
-                                                        <span style={{ fontFamily: "var(--pf-t--global--font--family--mono)", fontSize: "var(--pf-t--global--font--size--sm)" }}>
-                                                            {job.sources.join(', ')}
-                                                        </span>
-                                                    </DescriptionListDescription>
-                                                </DescriptionListGroup>
-                                                <DescriptionListGroup>
-                                                    <DescriptionListTerm>{_("Destination")}</DescriptionListTerm>
-                                                    <DescriptionListDescription>
-                                                        <span style={{ fontFamily: "var(--pf-t--global--font--family--mono)", fontSize: "var(--pf-t--global--font--size--sm)" }}>
-                                                            {job.repository}
-                                                        </span>
-                                                    </DescriptionListDescription>
-                                                </DescriptionListGroup>
-                                                {job.schedule && (
+                                                <DescriptionList isHorizontal isCompact>
                                                     <DescriptionListGroup>
-                                                        <DescriptionListTerm>{_("Schedule")}</DescriptionListTerm>
+                                                        <DescriptionListTerm>{_("Sources")}</DescriptionListTerm>
                                                         <DescriptionListDescription>
-                                                            <span className="schedule-badge">{job.schedule}</span>
-                                                            {timerStatuses[job.id]?.next_run &&
+                                                            <span style={{ fontFamily: "var(--pf-t--global--font--family--mono)", fontSize: "var(--pf-t--global--font--size--sm)" }}>
+                                                                {job.sources.join(', ')}
+                                                            </span>
+                                                        </DescriptionListDescription>
+                                                    </DescriptionListGroup>
+                                                    <DescriptionListGroup>
+                                                        <DescriptionListTerm>{_("Destination")}</DescriptionListTerm>
+                                                        <DescriptionListDescription>
+                                                            <span style={{ fontFamily: "var(--pf-t--global--font--family--mono)", fontSize: "var(--pf-t--global--font--size--sm)" }}>
+                                                                {job.repository}
+                                                            </span>
+                                                        </DescriptionListDescription>
+                                                    </DescriptionListGroup>
+                                                    {job.schedule && (
+                                                        <DescriptionListGroup>
+                                                            <DescriptionListTerm>{_("Schedule")}</DescriptionListTerm>
+                                                            <DescriptionListDescription>
+                                                                <span className="schedule-badge">{job.schedule}</span>
+                                                                {timerStatuses[job.id]?.next_run &&
                                                                 <span className="snapshot-time" style={{ marginLeft: "0.5rem" }}>
                                                                     {_("Next")}: {timerStatuses[job.id].next_run}
                                                                 </span>}
-                                                        </DescriptionListDescription>
-                                                    </DescriptionListGroup>
-                                                )}
-                                                {job.excludes.length > 0 && (
-                                                    <DescriptionListGroup>
-                                                        <DescriptionListTerm>{_("Excludes")}</DescriptionListTerm>
-                                                        <DescriptionListDescription>
-                                                            {job.excludes.length} {_("rules")}
-                                                        </DescriptionListDescription>
-                                                    </DescriptionListGroup>
-                                                )}
-                                                {job.retention && Object.values(job.retention).some(Boolean) && (
-                                                    <DescriptionListGroup>
-                                                        <DescriptionListTerm>{_("Retention")}</DescriptionListTerm>
-                                                        <DescriptionListDescription>
-                                                            {Object.entries(job.retention)
-                                                                .filter(([_, v]) => v)
-                                                                .map(([k, v]) => `${k.replace('keep_', '')}: ${v}`)
-                                                                .join(', ')}
-                                                        </DescriptionListDescription>
-                                                    </DescriptionListGroup>
-                                                )}
-                                            </DescriptionList>
-                                        </div>
+                                                            </DescriptionListDescription>
+                                                        </DescriptionListGroup>
+                                                    )}
+                                                    {job.excludes.length > 0 && (
+                                                        <DescriptionListGroup>
+                                                            <DescriptionListTerm>{_("Excludes")}</DescriptionListTerm>
+                                                            <DescriptionListDescription>
+                                                                {job.excludes.length} {_("rules")}
+                                                            </DescriptionListDescription>
+                                                        </DescriptionListGroup>
+                                                    )}
+                                                    {job.retention && Object.values(job.retention).some(Boolean) && (
+                                                        <DescriptionListGroup>
+                                                            <DescriptionListTerm>{_("Retention")}</DescriptionListTerm>
+                                                            <DescriptionListDescription>
+                                                                {Object.entries(job.retention)
+                                                                        .filter(([_, v]) => v)
+                                                                        .map(([k, v]) => `${k.replace('keep_', '')}: ${v}`)
+                                                                        .join(', ')}
+                                                            </DescriptionListDescription>
+                                                        </DescriptionListGroup>
+                                                    )}
+                                                </DescriptionList>
+                                            </div>
 
-                                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                                            <Button variant="secondary" size="sm" onClick={() => handleRunNow(job)}
-                                                isDisabled={!!runningBackups[job.id]} isLoading={!!runningBackups[job.id]}>
-                                                {runningBackups[job.id] ? _("Running...") : _("Run Now")}
-                                            </Button>
-                                            <Button variant="secondary" size="sm" onClick={() => handleEdit(job)}>
-                                                {_("Edit")}
-                                            </Button>
-                                            <Button variant="danger" size="sm" onClick={() => setDeleteTarget(job)}>
-                                                {_("Delete")}
-                                            </Button>
+                                            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                                <Button
+variant="secondary" size="sm" onClick={() => handleRunNow(job)}
+                                                isDisabled={!!runningBackups[job.id]} isLoading={!!runningBackups[job.id]}
+                                                >
+                                                    {runningBackups[job.id] ? _("Running...") : _("Run Now")}
+                                                </Button>
+                                                <Button variant="secondary" size="sm" onClick={() => handleEdit(job)}>
+                                                    {_("Edit")}
+                                                </Button>
+                                                <Button variant="danger" size="sm" onClick={() => setDeleteTarget(job)}>
+                                                    {_("Delete")}
+                                                </Button>
+                                            </div>
                                         </div>
-                                    </div>
-                                    {runningBackups[job.id] && (
-                                        <Progress
+                                        {runningBackups[job.id] && (
+                                            <Progress
                                             value={runningBackups[job.id].progress}
                                             title={runningBackups[job.id].status}
                                             size={ProgressSize.sm}
                                             style={{ marginTop: "0.5rem" }}
-                                        />
-                                    )}
-                                    {results[job.id] && (
-                                        <Alert variant={results[job.id].success ? "success" : "danger"}
+                                            />
+                                        )}
+                                        {results[job.id] && (
+                                            <Alert
+variant={results[job.id].success ? "success" : "danger"}
                                             isInline isPlain
                                             title={results[job.id].message}
                                             style={{ marginTop: "0.5rem" }}
-                                            actionClose={<Button variant="plain" onClick={() => clearResult(job.id)}>✕</Button>} />
-                                    )}
-                                </CardBody>
-                            </Card>
-                        ))}
+                                            actionClose={<Button variant="plain" onClick={() => clearResult(job.id)}>✕</Button>}
+                                            />
+                                        )}
+                                    </CardBody>
+                                </Card>
+                            ))}
                         </div>
                     </>
                 )}
@@ -319,15 +323,20 @@ function JobDialog({ job, destinations, onSave, onClose }: JobDialogProps) {
         const newJob: BackupJob = {
             id: job?.id || crypto.randomUUID(),
             name,
-            sources: sources.split('\n').map(s => s.trim()).filter(Boolean),
+            sources: sources.split('\n').map(s => s.trim())
+                    .filter(Boolean),
             repository,
             password_file: job?.password_file || dest?.password_file || '',
-            excludes: excludes.split('\n').map(s => s.trim()).filter(Boolean),
-            exclude_patterns: excludePatterns.split('\n').map(s => s.trim()).filter(Boolean),
-            exclude_if_present: excludeIfPresent.split('\n').map(s => s.trim()).filter(Boolean),
+            excludes: excludes.split('\n').map(s => s.trim())
+                    .filter(Boolean),
+            exclude_patterns: excludePatterns.split('\n').map(s => s.trim())
+                    .filter(Boolean),
+            exclude_if_present: excludeIfPresent.split('\n').map(s => s.trim())
+                    .filter(Boolean),
             exclude_larger_than: excludeLargerThan || undefined,
             exclude_caches: excludeCaches,
-            tags: tags.split(',').map(s => s.trim()).filter(Boolean),
+            tags: tags.split(',').map(s => s.trim())
+                    .filter(Boolean),
             schedule: schedule || undefined,
             retention: {
                 keep_last: keepLast ? parseInt(keepLast) : undefined,
@@ -348,25 +357,37 @@ function JobDialog({ job, destinations, onSave, onClose }: JobDialogProps) {
             <ModalBody>
                 <div className="job-form">
                     <FormGroup label={_("Job Name")} isRequired fieldId="job-name">
-                        <TextInput id="job-name" value={name} onChange={(_ev, val) => setName(val)}
-                            placeholder={_("Daily system backup")} />
+                        <TextInput
+id="job-name" value={name} onChange={(_ev, val) => setName(val)}
+                            placeholder={_("Daily system backup")}
+                        />
                     </FormGroup>
 
-                    <FormGroup label={_("Source Directories")} fieldId="job-sources"
-                        helperText={_("One path per line. These directories will be backed up.")}>
-                        <TextArea id="job-sources" value={sources} onChange={(_ev, val) => setSources(val)} rows={4}
-                            placeholder={"/home\n/etc\n/var/lib"} />
+                    <FormGroup
+label={_("Source Directories")} fieldId="job-sources"
+                        helperText={_("One path per line. These directories will be backed up.")}
+                    >
+                        <TextArea
+id="job-sources" value={sources} onChange={(_ev, val) => setSources(val)} rows={4}
+                            placeholder={"/home\n/etc\n/var/lib"}
+                        />
                     </FormGroup>
 
-                    <FormGroup label={_("Destination Repository")} fieldId="job-repo"
-                        helperText={_("Select a configured destination or enter a restic repository path")}>
-                        <TextInput id="job-repo" value={repository} onChange={(_ev, val) => setRepository(val)}
-                            placeholder="/backup/repo or sftp:user@host:/path or s3:bucket/path" />
+                    <FormGroup
+label={_("Destination Repository")} fieldId="job-repo"
+                        helperText={_("Select a configured destination or enter a restic repository path")}
+                    >
+                        <TextInput
+id="job-repo" value={repository} onChange={(_ev, val) => setRepository(val)}
+                            placeholder="/backup/repo or sftp:user@host:/path or s3:bucket/path"
+                        />
                         {destinations.length > 0 && (
                             <div style={{ marginTop: "0.5rem", display: "flex", gap: "0.25rem", flexWrap: "wrap" }}>
                                 {destinations.map(d => (
-                                    <Button key={d.id} variant="tertiary" size="sm" onClick={() => setRepository(d.path)}
-                                        isActive={repository === d.path}>
+                                    <Button
+key={d.id} variant="tertiary" size="sm" onClick={() => setRepository(d.path)}
+                                        isActive={repository === d.path}
+                                    >
                                         {d.name}
                                     </Button>
                                 ))}
@@ -374,14 +395,18 @@ function JobDialog({ job, destinations, onSave, onClose }: JobDialogProps) {
                         )}
                     </FormGroup>
 
-                    <FormGroup label={_("Schedule")} fieldId="job-schedule"
-                        helperText={_("How often backups run automatically. Leave empty for manual-only.")}>  
-                        <FormSelect id="job-schedule-preset" value={schedulePreset}
+                    <FormGroup
+label={_("Schedule")} fieldId="job-schedule"
+                        helperText={_("How often backups run automatically. Leave empty for manual-only.")}
+                    >
+                        <FormSelect
+id="job-schedule-preset" value={schedulePreset}
                             onChange={(_ev, val) => {
                                 setSchedulePreset(val);
                                 if (val !== 'custom') setSchedule(val);
                                 else setSchedule('');
-                            }}>
+                            }}
+                        >
                             <FormSelectOption value="" label={_("None (manual only)")} />
                             <FormSelectOption value="hourly" label={_("Every hour")} />
                             <FormSelectOption value="daily" label={_("Every day at midnight")} />
@@ -392,51 +417,79 @@ function JobDialog({ job, destinations, onSave, onClose }: JobDialogProps) {
                             <FormSelectOption value="custom" label={_("Custom (systemd OnCalendar)…")} />
                         </FormSelect>
                         {schedulePreset === 'custom' && (
-                            <TextInput id="job-schedule" value={schedule} onChange={(_ev, val) => setSchedule(val)}
+                            <TextInput
+id="job-schedule" value={schedule} onChange={(_ev, val) => setSchedule(val)}
                                 placeholder="*-*-* 04:30:00"
-                                style={{ marginTop: "0.5rem" }} />
+                                style={{ marginTop: "0.5rem" }}
+                            />
                         )}
                     </FormGroup>
 
                     <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap" }}>
-                        <Switch id="job-enabled" label={_("Enabled")} isChecked={enabled}
-                            onChange={(_ev, val) => setEnabled(val)} />
-                        <Switch id="job-caches" label={_("Exclude caches")} isChecked={excludeCaches}
-                            onChange={(_ev, val) => setExcludeCaches(val)} />
+                        <Switch
+id="job-enabled" label={_("Enabled")} isChecked={enabled}
+                            onChange={(_ev, val) => setEnabled(val)}
+                        />
+                        <Switch
+id="job-caches" label={_("Exclude caches")} isChecked={excludeCaches}
+                            onChange={(_ev, val) => setExcludeCaches(val)}
+                        />
                         <Tooltip content={_("Don't cross filesystem boundaries. If backing up /, won't descend into /mnt, /media, or other mounted drives.")}>
-                            <Switch id="job-onefs" label={_("Stay on one filesystem")} isChecked={oneFileSystem}
-                                onChange={(_ev, val) => setOneFileSystem(val)} />
+                            <Switch
+id="job-onefs" label={_("Stay on one filesystem")} isChecked={oneFileSystem}
+                                onChange={(_ev, val) => setOneFileSystem(val)}
+                            />
                         </Tooltip>
                     </div>
 
-                    <FormGroup label={_("Exclude Paths")} fieldId="job-excludes"
-                        helperText={_("One path per line")}>
-                        <TextArea id="job-excludes" value={excludes} onChange={(_ev, val) => setExcludes(val)} rows={3}
-                            placeholder={"/tmp\n/var/cache\n/proc"} />
+                    <FormGroup
+label={_("Exclude Paths")} fieldId="job-excludes"
+                        helperText={_("One path per line")}
+                    >
+                        <TextArea
+id="job-excludes" value={excludes} onChange={(_ev, val) => setExcludes(val)} rows={3}
+                            placeholder={"/tmp\n/var/cache\n/proc"}
+                        />
                     </FormGroup>
 
-                    <FormGroup label={_("Exclude Patterns")} fieldId="job-patterns"
-                        helperText={_("Glob patterns, one per line")}>
-                        <TextArea id="job-patterns" value={excludePatterns} onChange={(_ev, val) => setExcludePatterns(val)} rows={2}
-                            placeholder={"*.tmp\n*.log\n.cache/**"} />
+                    <FormGroup
+label={_("Exclude Patterns")} fieldId="job-patterns"
+                        helperText={_("Glob patterns, one per line")}
+                    >
+                        <TextArea
+id="job-patterns" value={excludePatterns} onChange={(_ev, val) => setExcludePatterns(val)} rows={2}
+                            placeholder={"*.tmp\n*.log\n.cache/**"}
+                        />
                     </FormGroup>
 
-                    <FormGroup label={_("Exclude if File Present")} fieldId="job-ifpresent"
-                        helperText={_("Skip directories containing these marker files")}>
-                        <TextInput id="job-ifpresent" value={excludeIfPresent} onChange={(_ev, val) => setExcludeIfPresent(val)}
-                            placeholder=".nobackup" />
+                    <FormGroup
+label={_("Exclude if File Present")} fieldId="job-ifpresent"
+                        helperText={_("Skip directories containing these marker files")}
+                    >
+                        <TextInput
+id="job-ifpresent" value={excludeIfPresent} onChange={(_ev, val) => setExcludeIfPresent(val)}
+                            placeholder=".nobackup"
+                        />
                     </FormGroup>
 
-                    <FormGroup label={_("Exclude Files Larger Than")} fieldId="job-maxsize"
-                        helperText={_("e.g. 100M, 1G, 500K")}>
-                        <TextInput id="job-maxsize" value={excludeLargerThan} onChange={(_ev, val) => setExcludeLargerThan(val)}
-                            placeholder="100M" style={{ maxWidth: "150px" }} />
+                    <FormGroup
+label={_("Exclude Files Larger Than")} fieldId="job-maxsize"
+                        helperText={_("e.g. 100M, 1G, 500K")}
+                    >
+                        <TextInput
+id="job-maxsize" value={excludeLargerThan} onChange={(_ev, val) => setExcludeLargerThan(val)}
+                            placeholder="100M" style={{ maxWidth: "150px" }}
+                        />
                     </FormGroup>
 
-                    <FormGroup label={_("Tags")} fieldId="job-tags"
-                        helperText={_("Comma-separated tags to identify these snapshots")}>
-                        <TextInput id="job-tags" value={tags} onChange={(_ev, val) => setTags(val)}
-                            placeholder="system, daily" />
+                    <FormGroup
+label={_("Tags")} fieldId="job-tags"
+                        helperText={_("Comma-separated tags to identify these snapshots")}
+                    >
+                        <TextInput
+id="job-tags" value={tags} onChange={(_ev, val) => setTags(val)}
+                            placeholder="system, daily"
+                        />
                     </FormGroup>
 
                     <Card isFlat isCompact>
