@@ -40,8 +40,8 @@ jobs:
         run: |
           test -f dist/manifest.json
           test -f dist/index.html
-          test -f dist/index.js
-          test -f dist/index.css
+          test -f dist/index.js.gz
+          test -f dist/index.css.gz
 
       - name: Upload build artifact
         if: matrix.node-version == 22
