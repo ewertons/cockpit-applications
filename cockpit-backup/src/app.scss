@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-@use "page.scss";
+@use "page";
 
 .backup-app {
     .pf-v6-c-page {
@@ -21,7 +21,7 @@
         }
 
         p {
-            margin: 0.25rem 0 0 0;
+            margin: 0.25rem 0 0;
             color: var(--pf-t--global--text--color--subtle);
             font-size: var(--pf-t--global--font--size--sm);
         }
