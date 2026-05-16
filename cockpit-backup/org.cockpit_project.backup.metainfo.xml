@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="addon">
+  <id>org.cockpit_project.backup</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <name>Backup</name>
+  <summary>Cockpit extension for managing backups with restic</summary>
+  <description>
+    <p>
+      A Cockpit extension for managing file backups using restic.
+      Supports local and remote destinations (SFTP, S3, Azure, GCS, B2),
+      scheduled backups with systemd timers, snapshot versioning,
+      retention policies, and point-in-time restore.
+    </p>
+  </description>
+  <extends>org.cockpit_project.cockpit</extends>
+  <launchable type="cockpit-manifest">backup</launchable>
+  <url type="homepage">https://github.com/cockpit-project/cockpit-backup</url>
+  <url type="bugtracker">https://github.com/cockpit-project/cockpit-backup/issues</url>
+  <update_contact>cockpit-devel_AT_lists.fedorahosted.org</update_contact>
+  <developer id="org.cockpit-project">
+    <name>Cockpit Project</name>
+  </developer>
+</component>

@@ -1,0 +1,19 @@
+{
+    "requires": {
+        "cockpit": "137"
+    },
+
+    "tools": {
+        "backup": {
+            "label": "Backup",
+            "path": "index.html",
+            "order": 50
+        }
+    },
+
+    "conditions": [
+        {
+            "path-exists": "/usr/bin/restic"
+        }
+    ]
+}

@@ -1,0 +1,165 @@
+#!/usr/bin/env node
+
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+import os from 'node:os';
+import path from 'node:path';
+import process from 'node:process';
+
+import { sassPlugin } from 'esbuild-sass-plugin';
+
+import { cockpitPoEsbuildPlugin } from './pkg/lib/cockpit-po-plugin.js';
+import { cockpitRsyncEsbuildPlugin } from './pkg/lib/cockpit-rsync-plugin.js';
+import { cleanPlugin } from './pkg/lib/esbuild-cleanup-plugin.js';
+import { cockpitCompressPlugin } from './pkg/lib/esbuild-compress-plugin.js';
+
+const useWasm = os.arch() !== 'x64';
+
+const esbuild = await (async () => {
+    try {
+        return (await import(useWasm ? 'esbuild-wasm' : 'esbuild')).default;
+    } catch (e) {
+        if (e.code !== 'ERR_MODULE_NOT_FOUND')
+            throw e;
+        const require = createRequire(import.meta.url);
+        return (await import(require.resolve('esbuild'))).default;
+    }
+})();
+
+const production = process.env.NODE_ENV === 'production';
+const nodePaths = ['pkg/lib'];
+const outdir = 'dist';
+
+const packageJson = JSON.parse(fs.readFileSync('package.json'));
+
+const parser = (await import('argparse')).default.ArgumentParser();
+parser.add_argument('-r', '--rsync', { help: "rsync bundles to ssh target after build", metavar: "HOST" });
+parser.add_argument('-w', '--watch', { action: 'store_true', help: "Enable watch mode", default: process.env.ESBUILD_WATCH === "true" });
+const args = parser.parse_args();
+
+if (args.rsync)
+    process.env.RSYNC = args.rsync;
+
+function notifyEndPlugin() {
+    return {
+        name: 'notify-end',
+        setup(build) {
+            let startTime;
+
+            build.onStart(() => {
+                startTime = new Date();
+            });
+
+            build.onEnd(() => {
+                const endTime = new Date();
+                const timeStamp = endTime.toTimeString().split(' ')[0];
+                console.log(`${timeStamp}: Build finished in ${endTime - startTime} ms`);
+            });
+        }
+    };
+}
+
+function watch_dirs(dir, on_change) {
+    const callback = (ev, dir, fname) => {
+        if (ev !== "change" || fname.startsWith('.'))
+            return;
+        on_change(path.join(dir, fname));
+    };
+
+    fs.watch(dir, {}, (ev, path) => callback(ev, dir, path));
+
+    const d = fs.opendirSync(dir);
+    let dirent;
+
+    while ((dirent = d.readSync()) !== null) {
+        if (dirent.isDirectory())
+            watch_dirs(path.join(dir, dirent.name), on_change);
+    }
+    d.closeSync();
+}
+
+const context = await esbuild.context({
+    ...!production ? { sourcemap: "linked" } : {},
+    bundle: true,
+    entryPoints: ['./src/index.js'],
+    external: ['*.woff', '*.woff2', '*.jpg', '*.svg', '../../assets*'],
+    legalComments: 'external',
+    loader: { ".js": "jsx", ".py": "text" },
+    minify: production,
+    nodePaths,
+    outdir,
+    metafile: true,
+    target: ['es2020'],
+    plugins: [
+        cleanPlugin(),
+        {
+            name: 'copy-assets',
+            setup(build) {
+                build.onEnd((output, _outputFiles) => {
+                    if (output?.errors.length === 0) {
+                        fs.copyFileSync('./src/manifest.json', './dist/manifest.json');
+                        fs.copyFileSync('./src/index.html', './dist/index.html');
+                    }
+                });
+            }
+        },
+
+        sassPlugin({
+            loadPaths: [...nodePaths, 'node_modules'],
+            filter: /\.scss/,
+            quietDeps: true,
+        }),
+
+        cockpitPoEsbuildPlugin(),
+        ...production ? [cockpitCompressPlugin()] : [],
+        cockpitRsyncEsbuildPlugin({ dest: packageJson.name }),
+        notifyEndPlugin(),
+    ]
+});
+
+try {
+    const result = await context.rebuild();
+
+    if (!args.watch) {
+        fs.writeFileSync('metafile.json', JSON.stringify(result.metafile));
+
+        const bundledPackages = new Set();
+        for (const inputPath of Object.keys(result.metafile.inputs)) {
+            const match = inputPath.match(/^node_modules\/(@[^/]+\/[^/]+|[^/]+)\//);
+            if (match)
+                bundledPackages.add(match[1]);
+        }
+
+        const packageLock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
+        const deps = [];
+        for (const pkgName of Array.from(bundledPackages).sort()) {
+            const lockKey = `node_modules/${pkgName}`;
+            const pkgInfo = packageLock.packages?.[lockKey];
+            if (pkgInfo?.version)
+                deps.push(`${pkgName} ${pkgInfo.version}`);
+            else
+                console.error(`Warning: Could not find version for ${pkgName}`);
+        }
+        fs.writeFileSync('runtime-npm-modules.txt', deps.join('\n') + '\n');
+    }
+} catch (e) {
+    if (!args.watch)
+        process.exit(1);
+}
+
+if (args.watch) {
+    const on_change = async path => {
+        console.log("change detected:", path);
+        await context.cancel();
+
+        try {
+            await context.rebuild();
+        } catch (e) {} // ignore in watch mode
+    };
+
+    watch_dirs('src', on_change);
+
+    await new Promise(() => {});
+}
+
+context.dispose();

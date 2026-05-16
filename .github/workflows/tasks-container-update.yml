@@ -28,8 +28,14 @@ jobs:
       - name: Pacify git's permission check
         run: git config --global --add safe.directory /__w/cockpit-applications/cockpit-applications
 
-      - name: Run tasks-container-update
+      - name: Run tasks-container-update (cockpit-git-server)
         working-directory: cockpit-git-server
+        run: |
+          make bots
+          bots/tasks-container-update
+
+      - name: Run tasks-container-update (cockpit-backup)
+        working-directory: cockpit-backup
         run: |
           make bots
           bots/tasks-container-update

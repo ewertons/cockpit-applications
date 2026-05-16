@@ -1,0 +1,105 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+@use "page.scss";
+
+.backup-app {
+    .pf-v6-c-page {
+        height: 100vh;
+    }
+}
+
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+
+    .page-header-title {
+        h2 {
+            margin: 0;
+            font-size: var(--pf-t--global--font--size--2xl);
+            font-weight: var(--pf-t--global--font--weight--heading--bold);
+        }
+
+        p {
+            margin: 0.25rem 0 0 0;
+            color: var(--pf-t--global--text--color--subtle);
+            font-size: var(--pf-t--global--font--size--sm);
+        }
+    }
+
+    .page-header-actions {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+    }
+}
+
+.job-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.snapshot-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.destination-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    gap: 1rem;
+}
+
+.status-section {
+    margin-bottom: 1.5rem;
+}
+
+.job-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.retention-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 0.75rem;
+}
+
+.stat-card {
+    text-align: center;
+    padding: 1rem;
+
+    .stat-value {
+        font-size: var(--pf-t--global--font--size--2xl);
+        font-weight: var(--pf-t--global--font--weight--heading--bold);
+        color: var(--pf-t--global--color--brand--default);
+    }
+
+    .stat-label {
+        font-size: var(--pf-t--global--font--size--sm);
+        color: var(--pf-t--global--text--color--subtle);
+        margin-top: 0.25rem;
+    }
+}
+
+.schedule-badge {
+    font-family: var(--pf-t--global--font--family--mono);
+    font-size: var(--pf-t--global--font--size--sm);
+    background: var(--pf-t--global--background--color--secondary--default);
+    padding: 0.125rem 0.5rem;
+    border-radius: var(--pf-t--global--border--radius--small);
+}
+
+.snapshot-time {
+    font-size: var(--pf-t--global--font--size--sm);
+    color: var(--pf-t--global--text--color--subtle);
+}
+
+.dest-path {
+    font-family: var(--pf-t--global--font--family--mono);
+    font-size: var(--pf-t--global--font--size--sm);
+    word-break: break-all;
+}

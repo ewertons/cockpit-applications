@@ -24,8 +24,14 @@ jobs:
       - name: Clone repository
         uses: actions/checkout@v6
 
-      - name: Run cockpit-lib-update
+      - name: Run cockpit-lib-update (cockpit-git-server)
         working-directory: cockpit-git-server
+        run: |
+          make bots
+          bots/cockpit-lib-update
+
+      - name: Run cockpit-lib-update (cockpit-backup)
+        working-directory: cockpit-backup
         run: |
           make bots
           bots/cockpit-lib-update

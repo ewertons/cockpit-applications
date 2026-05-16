@@ -9,12 +9,13 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    defaults:
-      run:
-        working-directory: cockpit-git-server
     strategy:
       matrix:
+        app: [cockpit-git-server, cockpit-backup]
         node-version: [20, 22]
+    defaults:
+      run:
+        working-directory: ${{ matrix.app }}
     steps:
       - name: Clone repository
         uses: actions/checkout@v6
@@ -47,14 +48,17 @@ jobs:
         if: matrix.node-version == 22
         uses: actions/upload-artifact@v7
         with:
-          name: cockpit-git-server-dist
-          path: cockpit-git-server/dist/
+          name: ${{ matrix.app }}-dist
+          path: ${{ matrix.app }}/dist/
 
   lint:
     runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        app: [cockpit-git-server, cockpit-backup]
     defaults:
       run:
-        working-directory: cockpit-git-server
+        working-directory: ${{ matrix.app }}
     steps:
       - name: Clone repository
         uses: actions/checkout@v6
