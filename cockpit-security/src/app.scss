@@ -1,0 +1,53 @@
+.security-app {
+    .pf-v6-c-page {
+        height: 100vh;
+    }
+}
+
+/* Status badges */
+.security-status-good {
+    color: var(--pf-t--global--color--status--success--default);
+}
+
+.security-status-warning {
+    color: var(--pf-t--global--color--status--warning--default);
+}
+
+.security-status-danger {
+    color: var(--pf-t--global--color--status--danger--default);
+}
+
+/* Dashboard cards */
+.security-dashboard-card {
+    min-height: 150px;
+}
+
+.security-stat-value {
+    font-size: var(--pf-t--global--font--size--2xl);
+    font-weight: var(--pf-t--global--font--weight--bold);
+}
+
+/* Log viewer */
+.log-viewer {
+    font-family: var(--pf-t--global--font--family--mono);
+    font-size: var(--pf-t--global--font--size--sm);
+    white-space: pre-wrap;
+    overflow-x: auto;
+    background: var(--pf-t--global--background--color--secondary--default);
+    padding: 1rem;
+    border-radius: var(--pf-t--global--border--radius--small);
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+/* Connection table */
+.connection-table {
+    font-family: var(--pf-t--global--font--family--mono);
+    font-size: var(--pf-t--global--font--size--sm);
+}
+
+/* Refresh timer */
+.auto-refresh-indicator {
+    font-size: var(--pf-t--global--font--size--sm);
+    color: var(--pf-t--global--text--color--subtle);
+}

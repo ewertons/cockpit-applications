@@ -1,0 +1,18 @@
+{
+    "requires": {
+        "cockpit": "137"
+    },
+
+    "menu": {
+        "security": {
+            "label": "Security",
+            "order": 35,
+            "path": "index.html",
+            "keywords": [
+                {
+                    "matches": ["security", "firewall", "network", "audit", "selinux", "apparmor", "fail2ban", "ssh", "intrusion", "hardening"]
+                }
+            ]
+        }
+    }
+}

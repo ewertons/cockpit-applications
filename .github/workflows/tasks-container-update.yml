@@ -39,3 +39,9 @@ jobs:
         run: |
           make bots
           bots/tasks-container-update
+
+      - name: Run tasks-container-update (cockpit-security)
+        working-directory: cockpit-security
+        run: |
+          make bots
+          bots/tasks-container-update
