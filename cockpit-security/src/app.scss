@@ -32,12 +32,11 @@
     font-family: var(--pf-t--global--font--family--mono);
     font-size: var(--pf-t--global--font--size--sm);
     white-space: pre-wrap;
-    overflow-x: auto;
+    overflow: auto;
     background: var(--pf-t--global--background--color--secondary--default);
     padding: 1rem;
     border-radius: var(--pf-t--global--border--radius--small);
     max-height: 500px;
-    overflow-y: auto;
 }
 
 /* Connection table */
