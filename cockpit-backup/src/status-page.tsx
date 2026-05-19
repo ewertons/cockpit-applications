@@ -220,9 +220,10 @@ export const StatusPage = () => {
                             </p>
                         )
                         : jobStatuses.map(status => (
-                            <div key={status.job.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0", borderBottom: "1px solid var(--pf-t--global--border--color--default)" }}>
-                                <div>
-                                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                            <Card key={status.job.id} isFlat isCompact style={{ marginBottom: "0.75rem" }}>
+                                <CardBody style={{ padding: "0.75rem" }}>
+                                    {/* Row 0: job name + labels */}
+                                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.5rem" }}>
                                         <Button variant="link" isInline onClick={() => cockpit.location.go(["jobs"])} style={{ fontWeight: "bold" }}>
                                             {status.job.name}
                                         </Button>
@@ -231,22 +232,27 @@ export const StatusPage = () => {
                                             : <Label color="grey">{_("Disabled")}</Label>}
                                         {status.running && <Label color="blue">{_("Running")}</Label>}
                                     </div>
-                                    <div style={{ fontSize: "var(--pf-t--global--font--size--sm)", color: "var(--pf-t--global--text--color--subtle)", marginTop: "0.125rem" }}>
-                                        {status.job.schedule
-                                            ? (
-                                                <>
-                                                    <span className="schedule-badge">{status.job.schedule}</span>
-                                                    {status.nextRun && <span style={{ marginLeft: "0.75rem" }}>{_("Next")}: {status.nextRun}</span>}
-                                                    {status.lastRun && status.lastRun !== "n/a" && <span style={{ marginLeft: "0.75rem" }}>{_("Last")}: {status.lastRun}</span>}
-                                                </>
-                                            )
-                                            : _("Manual only")}
+                                    {/* Rows 1-N: left (schedule info) + right (paths) */}
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", fontSize: "var(--pf-t--global--font--size--sm)", color: "var(--pf-t--global--text--color--subtle)" }}>
+                                        <div>
+                                            {status.job.schedule
+                                                ? (
+                                                    <>
+                                                        <div><span className="schedule-badge">{status.job.schedule}</span></div>
+                                                        {status.lastRun && status.lastRun !== "n/a" && <div style={{ marginTop: "0.25rem" }}>{_("Last")}: {status.lastRun}</div>}
+                                                        {status.nextRun && <div style={{ marginTop: "0.25rem" }}>{_("Next")}: {status.nextRun}</div>}
+                                                    </>
+                                                )
+                                                : <div>{_("Manual only")}</div>}
+                                        </div>
+                                        <div style={{ textAlign: "right", fontFamily: "var(--pf-t--global--font--family--mono)" }}>
+                                            {status.job.sources.map((src, i) => (
+                                                <div key={i}>{src}</div>
+                                            ))}
+                                        </div>
                                     </div>
-                                </div>
-                                <div style={{ fontSize: "var(--pf-t--global--font--size--sm)", color: "var(--pf-t--global--text--color--subtle)" }}>
-                                    {status.job.sources.join(', ')}
-                                </div>
-                            </div>
+                                </CardBody>
+                            </Card>
                         ))}
                 </CardBody>
             </Card>
