@@ -1,10 +1,31 @@
+@use "page";
+
 .security-app {
     .pf-v6-c-page {
         height: 100vh;
+        --pf-v6-c-page__sidebar--Width--base: 13.5rem;
     }
 }
 
-/* Status badges */
+/* Stat cards */
+.stat-card {
+    text-align: center;
+    padding: 1rem;
+
+    .stat-value {
+        font-size: var(--pf-t--global--font--size--2xl);
+        font-weight: var(--pf-t--global--font--weight--heading--bold);
+        color: var(--pf-t--global--color--brand--default);
+    }
+
+    .stat-label {
+        font-size: var(--pf-t--global--font--size--sm);
+        color: var(--pf-t--global--text--color--subtle);
+        margin-top: 0.25rem;
+    }
+}
+
+/* Status badges (used by sub-pages) */
 .security-status-good {
     color: var(--pf-t--global--color--status--success--default);
 }
@@ -15,16 +36,6 @@
 
 .security-status-danger {
     color: var(--pf-t--global--color--status--danger--default);
-}
-
-/* Dashboard cards */
-.security-dashboard-card {
-    min-height: 150px;
-}
-
-.security-stat-value {
-    font-size: var(--pf-t--global--font--size--2xl);
-    font-weight: var(--pf-t--global--font--weight--bold);
 }
 
 /* Log viewer */
