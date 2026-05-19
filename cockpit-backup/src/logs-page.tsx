@@ -30,6 +30,7 @@ export const LogsPage = () => {
     const [following, setFollowing] = useState(false);
     const followProc = useRef<any>(null);
     const logEndRef = useRef<HTMLDivElement>(null);
+    const logContainerRef = useRef<HTMLDivElement>(null);
 
     const fetchLogs = useCallback(async () => {
         setLoading(true);
@@ -76,6 +77,10 @@ export const LogsPage = () => {
     const startFollow = useCallback(() => {
         if (followProc.current) return;
         setFollowing(true);
+        localStorage.setItem("cockpit-backup-follow", "true");
+
+        // Scroll to bottom immediately
+        setTimeout(() => logEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
 
         const proc = cockpit.spawn(
             ["journalctl",
@@ -120,11 +125,32 @@ export const LogsPage = () => {
             followProc.current = null;
         }
         setFollowing(false);
+        localStorage.setItem("cockpit-backup-follow", "false");
     }, []);
 
     useEffect(() => {
-        return () => { stopFollow() };
-    }, [stopFollow]);
+        // On unmount, close the process but DON'T reset localStorage
+        return () => {
+            if (followProc.current) {
+                try { followProc.current.close() } catch { /* */ }
+                followProc.current = null;
+            }
+        };
+    }, []);
+
+    // Auto-start follow after initial load if preference was saved
+    const autoFollowStarted = useRef(false);
+    useEffect(() => {
+        if (!loading && !autoFollowStarted.current) {
+            autoFollowStarted.current = true;
+            if (localStorage.getItem("cockpit-backup-follow") === "true") {
+                setTimeout(() => {
+                    logEndRef.current?.scrollIntoView();
+                    startFollow();
+                }, 150);
+            }
+        }
+    }, [loading, startFollow]);
 
     const priorityLabel = (priority: number) => {
         if (priority <= 3) return <Label color="red">{_("Error")}</Label>;
