@@ -4,7 +4,7 @@ import {
     BackupJob, BackupProgress, Destination, destEnvVars,
     startBackupUnit, getRunningBackupUnits, jobIdFromUnit,
     isBackupUnitRunning, getBackupUnitResult, BACKUP_UNIT_PREFIX,
-    loadJobs
+    loadJobs, tagSnapshot, loadDestinations
 } from './restic.js';
 
 const _ = cockpit.gettext;
@@ -42,6 +42,8 @@ export function BackupProvider({ children }: { children: React.ReactNode }) {
     const [runningBackups, setRunningBackups] = useState<Record<string, RunningBackup>>({});
     const [results, setResults] = useState<Record<string, BackupResult>>({});
     const journalProcs = useRef<Record<string, any>>({});
+    const backupSummaries = useRef<Record<string, { snapshotId?: string; duration?: number }>>({});
+    const jobRepos = useRef<Record<string, { repo: string; passwordFile: string; envVars?: Record<string, string> }>>({});
 
     // Monitor a running backup unit via journalctl
     const monitorUnit = useCallback((jobId: string, _jobName: string) => {
@@ -73,6 +75,10 @@ export function BackupProvider({ children }: { children: React.ReactNode }) {
                             }
                         }));
                     } else if (msg.message_type === 'summary') {
+                        backupSummaries.current[jobId] = {
+                            snapshotId: msg.snapshot_id,
+                            duration: msg.total_duration,
+                        };
                         setRunningBackups(prev => ({
                             ...prev,
                             [jobId]: { ...prev[jobId], progress: 100, status: _("Finishing...") }
@@ -104,6 +110,38 @@ export function BackupProvider({ children }: { children: React.ReactNode }) {
         }
 
         const result = await getBackupUnitResult(jobId);
+
+        // Tag snapshot with duration if we captured it from the summary
+        const summary = backupSummaries.current[jobId];
+        if (result.success && summary?.snapshotId && summary.duration != null) {
+            const hours = Math.floor(summary.duration / 3600);
+            const mins = Math.floor((summary.duration % 3600) / 60);
+            const durationTag = `duration:${hours}:${String(mins).padStart(2, '0')}`;
+            const repoInfo = jobRepos.current[jobId];
+            if (repoInfo) {
+                try {
+                    await tagSnapshot(summary.snapshotId, durationTag, repoInfo.repo, repoInfo.passwordFile, repoInfo.envVars);
+                } catch (e) {
+                    console.warn("Failed to tag snapshot with duration:", e);
+                }
+            } else {
+                // Fallback: try to find the destination from loaded destinations
+                try {
+                    const dests = await loadDestinations();
+                    for (const dest of dests) {
+                        if (dest.initialized) {
+                            try {
+                                await tagSnapshot(summary.snapshotId, durationTag, dest.path, dest.password_file, destEnvVars(dest));
+                                break;
+                            } catch { /* try next */ }
+                        }
+                    }
+                } catch { /* ignore */ }
+            }
+        }
+        delete backupSummaries.current[jobId];
+        delete jobRepos.current[jobId];
+
         setRunningBackups(prev => { const r = { ...prev }; delete r[jobId]; return r });
         setResults(prev => ({
             ...prev,
@@ -151,6 +189,13 @@ export function BackupProvider({ children }: { children: React.ReactNode }) {
             [job.id]: { jobId: job.id, jobName: job.name, progress: 0, status: _("Starting..."), startedAt: Date.now() }
         }));
         setResults(prev => { const r = { ...prev }; delete r[job.id]; return r });
+
+        // Store repo info so we can tag the snapshot with duration after completion
+        jobRepos.current[job.id] = {
+            repo: job.repository,
+            passwordFile: job.password_file,
+            envVars: dest ? destEnvVars(dest) : undefined,
+        };
 
         try {
             await startBackupUnit(

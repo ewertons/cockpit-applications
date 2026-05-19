@@ -11,6 +11,9 @@ import { Label } from "@patternfly/react-core/dist/esm/components/Label/index.js
 import { Alert } from "@patternfly/react-core/dist/esm/components/Alert/index.js";
 import { Spinner } from "@patternfly/react-core/dist/esm/components/Spinner/index.js";
 import { SearchInput } from "@patternfly/react-core/dist/esm/components/SearchInput/index.js";
+import { Tooltip } from "@patternfly/react-core/dist/esm/components/Tooltip/index.js";
+import { Icon } from "@patternfly/react-core/dist/esm/components/Icon/index.js";
+import InfoCircleIcon from "@patternfly/react-icons/dist/esm/icons/info-circle-icon";
 
 import cockpit from 'cockpit';
 import {
@@ -38,6 +41,9 @@ export const SnapshotsPage = ({ snapshotId: _snapshotId }: SnapshotsPageProps) =
     const [deleteTarget, setDeleteTarget] = useState<ResticSnapshot | null>(null);
     const [deleting, setDeleting] = useState(false);
 
+    // Map snapshot ID to destination name
+    const [snapshotDestMap, setSnapshotDestMap] = useState<Record<string, string>>({});
+
     const refresh = useCallback(async () => {
         setLoading(true);
         setError(null);
@@ -46,10 +52,14 @@ export const SnapshotsPage = ({ snapshotId: _snapshotId }: SnapshotsPageProps) =
             setDestinations(d);
 
             const allSnapshots: ResticSnapshot[] = [];
+            const destMap: Record<string, string> = {};
             for (const dest of d) {
                 if (dest.initialized) {
                     try {
                         const snaps = await listSnapshots(dest.path, dest.password_file, destEnvVars(dest));
+                        for (const snap of snaps) {
+                            destMap[snap.id] = dest.name;
+                        }
                         allSnapshots.push(...snaps);
                     } catch (e: any) {
                         console.warn(`Failed to list snapshots for ${dest.name}:`, e.message);
@@ -58,6 +68,7 @@ export const SnapshotsPage = ({ snapshotId: _snapshotId }: SnapshotsPageProps) =
             }
             allSnapshots.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
             setSnapshots(allSnapshots);
+            setSnapshotDestMap(destMap);
         } catch (e: any) {
             setError(e.message || String(e));
         }
@@ -147,38 +158,40 @@ export const SnapshotsPage = ({ snapshotId: _snapshotId }: SnapshotsPageProps) =
                         <div className="snapshot-cards">
                             {filtered.map(snap => {
                                 const time = formatTime(snap.time);
+                                const destName = snapshotDestMap[snap.id] || _("Unknown");
+                                const durationTag = snap.tags?.find(t => t.startsWith("duration:"));
+                                const duration = durationTag ? durationTag.replace("duration:", "") : null;
+                                const displayTags = snap.tags?.filter(t => !t.startsWith("duration:"));
                                 return (
                                     <Card key={snap.id} isCompact isFlat style={{ padding: "0.5rem" }}>
                                         <CardBody style={{ padding: "0.5rem" }}>
-                                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                                                <div style={{ flex: 1 }}>
-                                                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.5rem" }}>
-                                                        <Label color="blue" style={{ fontFamily: "var(--pf-t--global--font--family--mono)" }}>
-                                                            {snap.short_id}
-                                                        </Label>
-                                                        <span title={time.full} className="snapshot-time">
-                                                            {time.full}
-                                                        </span>
-                                                        <span className="snapshot-time">({time.relative})</span>
-                                                        {snap.tags && snap.tags.map(tag => (
-                                                            <Label key={tag} color="purple">{tag}</Label>
-                                                        ))}
+                                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                                <div style={{ display: "flex", gap: "0.75rem", flex: 1, alignItems: "flex-start" }}>
+                                                    <Label color="blue" style={{ fontFamily: "var(--pf-t--global--font--family--mono)", flexShrink: 0, marginTop: "0.1rem" }}>
+                                                        {snap.short_id}
+                                                    </Label>
+                                                    <div>
+                                                        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.25rem" }}>
+                                                            <span title={time.full} className="snapshot-time">
+                                                                {time.full}
+                                                            </span>
+                                                            <span className="snapshot-time">({time.relative})</span>
+                                                            {displayTags && displayTags.map(tag => (
+                                                                <Label key={tag} color="purple">{tag}</Label>
+                                                            ))}
+                                                        </div>
+                                                        <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "var(--pf-t--global--font--size--sm)", color: "var(--pf-t--global--text--color--subtle)", fontFamily: "var(--pf-t--global--font--family--mono)" }}>
+                                                            <span>{snap.hostname}:{snap.paths.join(', ')}</span>
+                                                            <span style={{ fontFamily: "var(--pf-t--global--font--family--body)" }}>→</span>
+                                                            <span style={{ fontFamily: "var(--pf-t--global--font--family--body)", fontWeight: 500 }}>{destName}</span>
+                                                            {duration && <span style={{ fontFamily: "var(--pf-t--global--font--family--body)" }}>({duration})</span>}
+                                                            <Tooltip content={_("Format: host:path → destination (h:mm)")}>
+                                                                <Icon size="sm" style={{ color: "var(--pf-t--global--icon--color--subtle)", cursor: "pointer" }}>
+                                                                    <InfoCircleIcon />
+                                                                </Icon>
+                                                            </Tooltip>
+                                                        </div>
                                                     </div>
-
-                                                    <DescriptionList isHorizontal isCompact>
-                                                        <DescriptionListGroup>
-                                                            <DescriptionListTerm>{_("Paths")}</DescriptionListTerm>
-                                                            <DescriptionListDescription>
-                                                                <span style={{ fontFamily: "var(--pf-t--global--font--family--mono)", fontSize: "var(--pf-t--global--font--size--sm)" }}>
-                                                                    {snap.paths.join(', ')}
-                                                                </span>
-                                                            </DescriptionListDescription>
-                                                        </DescriptionListGroup>
-                                                        <DescriptionListGroup>
-                                                            <DescriptionListTerm>{_("Host")}</DescriptionListTerm>
-                                                            <DescriptionListDescription>{snap.hostname}</DescriptionListDescription>
-                                                        </DescriptionListGroup>
-                                                    </DescriptionList>
                                                 </div>
 
                                                 <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>

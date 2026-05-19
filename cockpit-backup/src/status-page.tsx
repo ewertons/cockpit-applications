@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Button } from "@patternfly/react-core/dist/esm/components/Button/index.js";
 import { Card, CardBody, CardTitle } from "@patternfly/react-core/dist/esm/components/Card/index.js";
-import { DescriptionList, DescriptionListDescription, DescriptionListGroup, DescriptionListTerm } from "@patternfly/react-core/dist/esm/components/DescriptionList/index.js";
 import { EmptyState, EmptyStateBody, EmptyStateFooter, EmptyStateActions } from "@patternfly/react-core/dist/esm/components/EmptyState/index.js";
 import { Label } from "@patternfly/react-core/dist/esm/components/Label/index.js";
 import { Progress } from "@patternfly/react-core/dist/esm/components/Progress/index.js";
@@ -39,8 +38,12 @@ export const StatusPage = () => {
     const [error, setError] = useState<string | null>(null);
     const { runningBackups } = useBackups();
 
+    const initialLoadDone = React.useRef(false);
+
     const refresh = useCallback(async () => {
-        setLoading(true);
+        if (!initialLoadDone.current) {
+            setLoading(true);
+        }
         setError(null);
         try {
             const [jobs, dests] = await Promise.all([loadJobs(), loadDestinations()]);
@@ -85,6 +88,7 @@ export const StatusPage = () => {
             setError(e.message || String(e));
         }
         setLoading(false);
+        initialLoadDone.current = true;
     }, []);
 
     useEffect(() => { refresh() }, [refresh]);
@@ -252,37 +256,27 @@ export const StatusPage = () => {
                 <Card isCompact className="status-section">
                     <CardTitle>{_("Repository Health")}</CardTitle>
                     <CardBody>
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "1rem" }}>
-                            {destinations.map(dest => (
-                                <Card key={dest.id} isFlat isCompact isPlain>
-                                    <CardBody>
-                                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem" }}>
-                                            <strong>{dest.name}</strong>
-                                            <Label color={dest.initialized ? "green" : "orange"}>
-                                                {dest.initialized ? _("OK") : _("Not init")}
-                                            </Label>
-                                        </div>
-                                        {repoStatsMap[dest.id]
-                                            ? (
-                                                <DescriptionList isCompact>
-                                                    <DescriptionListGroup>
-                                                        <DescriptionListTerm>{_("Size")}</DescriptionListTerm>
-                                                        <DescriptionListDescription>{formatBytes(repoStatsMap[dest.id].total_size || 0)}</DescriptionListDescription>
-                                                    </DescriptionListGroup>
-                                                    <DescriptionListGroup>
-                                                        <DescriptionListTerm>{_("Files")}</DescriptionListTerm>
-                                                        <DescriptionListDescription>{(repoStatsMap[dest.id].total_file_count || 0).toLocaleString()}</DescriptionListDescription>
-                                                    </DescriptionListGroup>
-                                                </DescriptionList>
-                                            )
-                                            : (
-                                                <span style={{ fontSize: "var(--pf-t--global--font--size--sm)", color: "var(--pf-t--global--text--color--subtle)" }}>
-                                                    {_("Stats unavailable")}
-                                                </span>
-                                            )}
-                                    </CardBody>
-                                </Card>
-                            ))}
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "0.75rem" }}>
+                            {destinations.map(dest => {
+                                const stats = repoStatsMap[dest.id];
+                                return (
+                                    <Card key={dest.id} isFlat isCompact isPlain>
+                                        <CardBody style={{ padding: "0.5rem 0.75rem" }}>
+                                            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.25rem" }}>
+                                                <strong>{dest.name}</strong>
+                                                <Label color={dest.initialized ? "green" : "orange"}>
+                                                    {dest.initialized ? _("OK") : _("Not init")}
+                                                </Label>
+                                            </div>
+                                            <div style={{ fontSize: "var(--pf-t--global--font--size--sm)", color: "var(--pf-t--global--text--color--subtle)" }}>
+                                                {stats
+                                                    ? cockpit.format(_("$0 · $1 files"), formatBytes(stats.total_size || 0), (stats.total_file_count || 0).toLocaleString())
+                                                    : _("Stats unavailable")}
+                                            </div>
+                                        </CardBody>
+                                    </Card>
+                                );
+                            })}
                         </div>
                     </CardBody>
                 </Card>

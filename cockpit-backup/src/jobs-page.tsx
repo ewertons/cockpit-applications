@@ -6,7 +6,6 @@ import { EmptyState, EmptyStateBody, EmptyStateFooter, EmptyStateActions } from 
 import { FormGroup } from "@patternfly/react-core/dist/esm/components/Form/index.js";
 import { Modal, ModalBody, ModalFooter, ModalHeader } from "@patternfly/react-core/dist/esm/components/Modal/index.js";
 import { TextInput } from "@patternfly/react-core/dist/esm/components/TextInput/index.js";
-import { TextArea } from "@patternfly/react-core/dist/esm/components/TextArea/index.js";
 import { Switch } from "@patternfly/react-core/dist/esm/components/Switch/index.js";
 import { Label } from "@patternfly/react-core/dist/esm/components/Label/index.js";
 import { Alert } from "@patternfly/react-core/dist/esm/components/Alert/index.js";
@@ -367,9 +366,12 @@ id="job-name" value={name} onChange={(_ev, val) => setName(val)}
 label={_("Source Directories")} fieldId="job-sources"
                         helperText={_("One path per line. These directories will be backed up.")}
                     >
-                        <TextArea
-id="job-sources" value={sources} onChange={(_ev, val) => setSources(val)} rows={4}
-                            placeholder={"/home\n/etc\n/var/lib"}
+                        <textarea
+                            id="job-sources"
+                            className="pf-v6-c-form-control fixed-textarea"
+                            value={sources}
+                            onChange={(ev) => setSources(ev.target.value)}
+                            placeholder="/home&#10;/etc&#10;/var/lib"
                         />
                     </FormGroup>
 
@@ -446,9 +448,12 @@ id="job-onefs" label={_("Stay on one filesystem")} isChecked={oneFileSystem}
 label={_("Exclude Paths")} fieldId="job-excludes"
                         helperText={_("One path per line")}
                     >
-                        <TextArea
-id="job-excludes" value={excludes} onChange={(_ev, val) => setExcludes(val)} rows={3}
-                            placeholder={"/tmp\n/var/cache\n/proc"}
+                        <textarea
+                            id="job-excludes"
+                            className="pf-v6-c-form-control fixed-textarea small"
+                            value={excludes}
+                            onChange={(ev) => setExcludes(ev.target.value)}
+                            placeholder="/tmp&#10;/var/cache&#10;/proc"
                         />
                     </FormGroup>
 
@@ -456,9 +461,12 @@ id="job-excludes" value={excludes} onChange={(_ev, val) => setExcludes(val)} row
 label={_("Exclude Patterns")} fieldId="job-patterns"
                         helperText={_("Glob patterns, one per line")}
                     >
-                        <TextArea
-id="job-patterns" value={excludePatterns} onChange={(_ev, val) => setExcludePatterns(val)} rows={2}
-                            placeholder={"*.tmp\n*.log\n.cache/**"}
+                        <textarea
+                            id="job-patterns"
+                            className="pf-v6-c-form-control fixed-textarea small"
+                            value={excludePatterns}
+                            onChange={(ev) => setExcludePatterns(ev.target.value)}
+                            placeholder="*.tmp&#10;*.log&#10;.cache/**"
                         />
                     </FormGroup>
 

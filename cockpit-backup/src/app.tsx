@@ -8,11 +8,12 @@ import { BackupProvider } from './backup-context.jsx';
 import { JobsPage } from './jobs-page.jsx';
 import { SnapshotsPage } from './snapshots-page.jsx';
 import { DestinationsPage } from './destinations-page.jsx';
+import { LogsPage } from './logs-page.jsx';
 import { StatusPage } from './status-page.jsx';
 
 const _ = cockpit.gettext;
 
-type AppPage = "status" | "jobs" | "snapshots" | "destinations";
+type AppPage = "status" | "jobs" | "snapshots" | "destinations" | "logs";
 
 interface LocationState {
     page: AppPage;
@@ -42,6 +43,9 @@ function parseLocation(): LocationState {
             page: "destinations",
             destinationId: path[1] || undefined,
         };
+    }
+    if (path.length >= 1 && path[0] === "logs") {
+        return { page: "logs" };
     }
     // Default: status (dashboard)
     return { page: "status" };
@@ -77,6 +81,9 @@ export const Application = () => {
                         <NavItem itemId="/destinations" isActive={location.page === "destinations"}>
                             {_("Destinations")}
                         </NavItem>
+                        <NavItem itemId="/logs" isActive={location.page === "logs"}>
+                            {_("Logs")}
+                        </NavItem>
                     </NavList>
                 </Nav>
             </PageSidebarBody>
@@ -96,6 +103,9 @@ export const Application = () => {
         break;
     case "destinations":
         content = <DestinationsPage destinationId={location.destinationId} />;
+        break;
+    case "logs":
+        content = <LogsPage />;
         break;
     default:
         content = <StatusPage />;

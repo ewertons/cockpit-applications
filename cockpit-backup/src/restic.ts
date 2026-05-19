@@ -418,6 +418,17 @@ export async function deleteSnapshot(
     return resticCmd(["forget", snapshotId, "--prune", "--json"], repo, passwordFile, envVars);
 }
 
+// Add a tag to a snapshot
+export async function tagSnapshot(
+    snapshotId: string,
+    tag: string,
+    repo: string,
+    passwordFile: string,
+    envVars?: Record<string, string>
+): Promise<string> {
+    return resticCmd(["tag", "--add", tag, snapshotId], repo, passwordFile, envVars);
+}
+
 // List files in a snapshot
 export async function listSnapshotFiles(
     snapshotId: string,
@@ -488,6 +499,61 @@ export async function enableJobSchedule(job: BackupJob): Promise<void> {
 
     const serviceName = `${SERVICE_PREFIX}-${job.id}`;
 
+    // Find the matching destination to get SSH key and env vars
+    const destinations = await loadDestinations();
+    const dest = destinations.find(d => d.path === job.repository);
+
+    // Build environment lines
+    const envLines: string[] = [
+        `Environment="RESTIC_REPOSITORY=${job.repository}"`,
+        `Environment="RESTIC_PASSWORD_FILE=${job.password_file}"`,
+    ];
+    if (dest?.env_vars) {
+        for (const [key, val] of Object.entries(dest.env_vars)) {
+            if (key !== '_SSH_KEY') {
+                envLines.push(`Environment="${key}=${val}"`);
+            }
+        }
+    }
+
+    // Build the restic command arguments
+    const args: string[] = ["backup", "--json"];
+    for (const src of job.sources) {
+        args.push(src);
+    }
+    for (const ex of job.excludes) {
+        args.push("--exclude", ex);
+    }
+    for (const pat of job.exclude_patterns) {
+        args.push("--exclude", pat);
+    }
+    for (const f of job.exclude_if_present) {
+        args.push("--exclude-if-present", f);
+    }
+    if (job.exclude_larger_than) {
+        args.push("--exclude-larger-than", job.exclude_larger_than);
+    }
+    if (job.exclude_caches) {
+        args.push("--exclude-caches");
+    }
+    for (const tag of job.tags) {
+        args.push("--tag", tag);
+    }
+    if (job.one_file_system) {
+        args.push("--one-file-system");
+    }
+
+    // Handle SFTP SSH key
+    const sshKeyPath = dest?.ssh_key;
+    if (sshKeyPath) {
+        const host = sftpHost(job.repository);
+        if (host) {
+            args.push("-o", `sftp.command=ssh ${host} -i ${sshKeyPath} -o StrictHostKeyChecking=accept-new -s sftp`);
+        }
+    }
+
+    const execStart = `/usr/bin/restic ${args.map(a => a.includes(' ') ? `"${a}"` : a).join(' ')}`;
+
     const serviceContent = `[Unit]
 Description=Cockpit Backup Job: ${job.name}
 After=network-online.target
@@ -495,8 +561,8 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/restic backup ${job.sources.join(' ')} --repo ${job.repository} --password-file ${job.password_file} ${job.excludes.map(e => `--exclude ${e}`).join(' ')} ${job.tags.map(t => `--tag ${t}`).join(' ')}
-${job.one_file_system ? 'ExecStart=/usr/bin/restic backup --one-file-system' : ''}
+${envLines.join('\n')}
+ExecStart=${execStart}
 `;
 
     const timerContent = `[Unit]
