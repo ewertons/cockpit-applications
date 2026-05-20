@@ -232,7 +232,8 @@ textarea.fixed-textarea {
     grid-template-columns: 220px 1fr;
     gap: 0;
     border: 1px solid var(--pf-t--global--border--color--default);
-    border-radius: var(--pf-t--global--border--radius--small);
+    border-top: none;
+    border-radius: 0 0 var(--pf-t--global--border--radius--small) var(--pf-t--global--border--radius--small);
     height: 400px;
     overflow: hidden;
 }
@@ -246,8 +247,10 @@ textarea.fixed-textarea {
 }
 
 .file-browser-breadcrumb {
-    padding: 0.5rem;
-    border-bottom: 1px solid var(--pf-t--global--border--color--default);
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--pf-t--global--border--color--default);
+    border-radius: var(--pf-t--global--border--radius--small) var(--pf-t--global--border--radius--small) 0 0;
+    background: var(--pf-t--global--background--color--secondary--default);
     font-size: var(--pf-t--global--font--size--sm);
     white-space: nowrap;
     overflow-x: auto;
@@ -382,7 +385,8 @@ textarea.fixed-textarea {
     }
 
     .fb-date {
-        width: 140px;
+        width: 160px;
+        white-space: nowrap;
         color: var(--pf-t--global--text--color--subtle);
     }
 }

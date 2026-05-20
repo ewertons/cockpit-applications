@@ -164,22 +164,22 @@ export function SnapshotFileBrowser({ snapshot, destinations, onSelect, onClose 
             <ModalBody>
                 {error && <Alert variant="danger" title={_("Error")} isInline style={{ marginBottom: "0.5rem" }}>{error}</Alert>}
 
+                <div className="file-browser-breadcrumb">
+                    {dirTree.map((dir, i) => (
+                        <span key={dir}>
+                            {i > 0 && <span className="breadcrumb-sep">/</span>}
+                            <button
+                                className={`breadcrumb-link ${dir === currentPath ? 'active' : ''}`}
+                                onClick={() => loadDir(dir)}
+                            >
+                                {i === 0 ? '/' : dir.split('/').pop()}
+                            </button>
+                        </span>
+                    ))}
+                </div>
                 <div className="file-browser">
                     {/* Left panel: directory navigation */}
                     <div className="file-browser-left">
-                        <div className="file-browser-breadcrumb">
-                            {dirTree.map((dir, i) => (
-                                <span key={dir}>
-                                    {i > 0 && <span className="breadcrumb-sep">/</span>}
-                                    <button
-                                        className={`breadcrumb-link ${dir === currentPath ? 'active' : ''}`}
-                                        onClick={() => loadDir(dir)}
-                                    >
-                                        {i === 0 ? '/' : dir.split('/').pop()}
-                                    </button>
-                                </span>
-                            ))}
-                        </div>
                         <div className="file-browser-dirs">
                             {currentPath !== '/' && (
                                 <div className="dir-entry" onClick={navigateUp}>
