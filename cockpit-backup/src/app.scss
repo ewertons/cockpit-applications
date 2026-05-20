@@ -92,13 +92,13 @@
 
     .snap-time {
         font-size: var(--pf-t--global--font--size--sm);
-        padding-right: 0.25rem;
+        padding-right: 0;
     }
 
     .snap-relative {
         font-size: var(--pf-t--global--font--size--sm);
         color: var(--pf-t--global--text--color--subtle);
-        padding-left: 0;
+        padding-left: 0.125rem;
     }
 
     .snap-retention {
@@ -106,11 +106,12 @@
     }
 
     .snap-actions {
-        width: 1%;
+        white-space: nowrap;
         text-align: right;
-        display: flex;
-        gap: 0.25rem;
-        justify-content: flex-end;
+
+        .pf-v6-c-button {
+            margin-left: 0.25rem;
+        }
     }
 }
 

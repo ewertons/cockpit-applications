@@ -233,10 +233,10 @@ export const SnapshotsPage = ({ snapshotId: _snapshotId }: SnapshotsPageProps) =
                                                                 {retention && <Label color={retentionColor(retention)} isCompact>{retention}</Label>}
                                                             </td>
                                                             <td className="snap-actions">
-                                                                <Button variant="secondary" size="sm" onClick={() => setRestoreTarget(snap)}>
+                                                                <Button variant="secondary" onClick={() => setRestoreTarget(snap)}>
                                                                     {_("Restore")}
                                                                 </Button>
-                                                                <Button variant="danger" size="sm" onClick={() => setDeleteTarget(snap)}>
+                                                                <Button variant="danger" onClick={() => setDeleteTarget(snap)}>
                                                                     {_("Delete")}
                                                                 </Button>
                                                             </td>
