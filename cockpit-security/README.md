@@ -88,4 +88,4 @@ Built with React, PatternFly 6, TypeScript, and the Cockpit JS API.
 
 ## License
 
-LGPL-2.1-or-later
+[MIT](../LICENSE)

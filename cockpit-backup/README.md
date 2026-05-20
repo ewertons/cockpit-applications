@@ -55,4 +55,4 @@ npm run stylelint
 
 ## License
 
-[LGPL-2.1](../LICENSE)
+[MIT](../LICENSE)

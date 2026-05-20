@@ -18,4 +18,4 @@ See each application's README for installation, usage, and development instructi
 
 ## License
 
-[LGPL-2.1](LICENSE)
+[MIT](LICENSE)
