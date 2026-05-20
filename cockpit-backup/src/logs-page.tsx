@@ -30,7 +30,6 @@ export const LogsPage = () => {
     const [following, setFollowing] = useState(false);
     const followProc = useRef<any>(null);
     const logEndRef = useRef<HTMLDivElement>(null);
-    const logContainerRef = useRef<HTMLDivElement>(null);
 
     const fetchLogs = useCallback(async () => {
         setLoading(true);
@@ -65,7 +64,7 @@ export const LogsPage = () => {
                 } catch { /* skip non-JSON lines */ }
             }
             setLogs(entries);
-        } catch (e: any) {
+        } catch {
             // If no entries found, journalctl may exit with error
             setLogs([]);
         }
@@ -200,10 +199,13 @@ export const LogsPage = () => {
                         onOpenChange={setTypeFilterOpen}
                         toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
                             <MenuToggle ref={toggleRef} onClick={() => setTypeFilterOpen(!typeFilterOpen)} isExpanded={typeFilterOpen} style={{ minWidth: "10rem" }}>
-                                {typeFilter === "all" ? _("All entries") :
-                                    typeFilter === "errors" ? _("Errors only") :
-                                        typeFilter === "scheduled" ? _("Scheduled runs") :
-                                            _("Manual runs")}
+                                {typeFilter === "all"
+                                    ? _("All entries")
+                                    : typeFilter === "errors"
+                                        ? _("Errors only")
+                                        : typeFilter === "scheduled"
+                                            ? _("Scheduled runs")
+                                            : _("Manual runs")}
                             </MenuToggle>
                         )}
                     >

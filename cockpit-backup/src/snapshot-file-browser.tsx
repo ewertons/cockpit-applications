@@ -211,7 +211,7 @@ export function SnapshotFileBrowser({ snapshot, destinations, onSelect, onClose 
                                 <table className="file-browser-table">
                                     <thead>
                                         <tr>
-                                            <th className="fb-check"></th>
+                                            <th className="fb-check" />
                                             <th className="fb-name">{_("Name")}</th>
                                             <th className="fb-size">{_("Size")}</th>
                                             <th className="fb-date">{_("Modified")}</th>

@@ -163,11 +163,11 @@ export const SnapshotsPage = ({ snapshotId: _snapshotId }: SnapshotsPageProps) =
 
     const retentionColor = (label: string): "blue" | "green" | "orange" | "purple" => {
         switch (label.toLowerCase()) {
-            case "daily": return "blue";
-            case "weekly": return "green";
-            case "monthly": return "orange";
-            case "long": return "purple";
-            default: return "blue";
+        case "daily": return "blue";
+        case "weekly": return "green";
+        case "monthly": return "orange";
+        case "long": return "purple";
+        default: return "blue";
         }
     };
 
