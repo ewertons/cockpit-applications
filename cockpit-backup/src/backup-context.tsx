@@ -210,7 +210,7 @@ export function BackupProvider({ children }: { children: React.ReactNode }) {
                     excludeIfPresent: job.exclude_if_present,
                     excludeLargerThan: job.exclude_larger_than,
                     excludeCaches: job.exclude_caches,
-                    tags: job.tags,
+                    tags: [...job.tags, `job:${job.name}`],
                     oneFileSystem: job.one_file_system,
                 },
                 dest ? destEnvVars(dest) : undefined,

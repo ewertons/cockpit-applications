@@ -539,6 +539,8 @@ export async function enableJobSchedule(job: BackupJob): Promise<void> {
     for (const tag of job.tags) {
         args.push("--tag", tag);
     }
+    // Auto-tag with job name for snapshot grouping
+    args.push("--tag", `job:${job.name}`);
     if (job.one_file_system) {
         args.push("--one-file-system");
     }

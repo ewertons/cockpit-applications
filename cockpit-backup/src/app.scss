@@ -62,10 +62,54 @@
     gap: 0.5rem;
 }
 
-.snapshot-cards {
+.snapshot-groups {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 1rem;
+}
+
+.snapshot-table {
+    width: 100%;
+    border-collapse: collapse;
+
+    tr {
+        border-bottom: 1px solid var(--pf-t--global--border--color--default);
+
+        &:last-child {
+            border-bottom: none;
+        }
+    }
+
+    td {
+        padding: 0.4rem 0.5rem;
+        white-space: nowrap;
+        vertical-align: middle;
+    }
+
+    .snap-id {
+        width: 1%;
+    }
+
+    .snap-time {
+        font-size: var(--pf-t--global--font--size--sm);
+    }
+
+    .snap-relative {
+        font-size: var(--pf-t--global--font--size--sm);
+        color: var(--pf-t--global--text--color--subtle);
+    }
+
+    .snap-retention {
+        width: 1%;
+    }
+
+    .snap-actions {
+        width: 1%;
+        text-align: right;
+        display: flex;
+        gap: 0.25rem;
+        justify-content: flex-end;
+    }
 }
 
 .destination-cards {

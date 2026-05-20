@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Button } from "@patternfly/react-core/dist/esm/components/Button/index.js";
-import { Card, CardBody } from "@patternfly/react-core/dist/esm/components/Card/index.js";
+import { Card, CardBody, CardHeader, CardTitle } from "@patternfly/react-core/dist/esm/components/Card/index.js";
 import { DescriptionList, DescriptionListDescription, DescriptionListGroup, DescriptionListTerm } from "@patternfly/react-core/dist/esm/components/DescriptionList/index.js";
 import { EmptyState, EmptyStateBody, EmptyStateFooter, EmptyStateActions } from "@patternfly/react-core/dist/esm/components/EmptyState/index.js";
 import { FormGroup } from "@patternfly/react-core/dist/esm/components/Form/index.js";
@@ -11,13 +11,11 @@ import { Label } from "@patternfly/react-core/dist/esm/components/Label/index.js
 import { Alert } from "@patternfly/react-core/dist/esm/components/Alert/index.js";
 import { Spinner } from "@patternfly/react-core/dist/esm/components/Spinner/index.js";
 import { SearchInput } from "@patternfly/react-core/dist/esm/components/SearchInput/index.js";
-import { Tooltip } from "@patternfly/react-core/dist/esm/components/Tooltip/index.js";
-import { Icon } from "@patternfly/react-core/dist/esm/components/Icon/index.js";
-import InfoCircleIcon from "@patternfly/react-icons/dist/esm/icons/info-circle-icon";
+import CheckCircleIcon from "@patternfly/react-icons/dist/esm/icons/check-circle-icon";
 
 import cockpit from 'cockpit';
 import {
-    ResticSnapshot, loadDestinations, Destination, destEnvVars,
+    ResticSnapshot, loadDestinations, loadJobs, BackupJob, Destination, destEnvVars,
     listSnapshots, deleteSnapshot, restoreSnapshot
 } from './restic.js';
 
@@ -30,6 +28,7 @@ interface SnapshotsPageProps {
 export const SnapshotsPage = ({ snapshotId: _snapshotId }: SnapshotsPageProps) => {
     const [snapshots, setSnapshots] = useState<ResticSnapshot[]>([]);
     const [destinations, setDestinations] = useState<Destination[]>([]);
+    const [jobs, setJobs] = useState<BackupJob[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState("");
@@ -48,8 +47,9 @@ export const SnapshotsPage = ({ snapshotId: _snapshotId }: SnapshotsPageProps) =
         setLoading(true);
         setError(null);
         try {
-            const d = await loadDestinations();
+            const [d, j] = await Promise.all([loadDestinations(), loadJobs()]);
             setDestinations(d);
+            setJobs(j);
 
             const allSnapshots: ResticSnapshot[] = [];
             const destMap: Record<string, string> = {};
@@ -122,6 +122,52 @@ export const SnapshotsPage = ({ snapshotId: _snapshotId }: SnapshotsPageProps) =
             (s.tags && s.tags.some(t => t.toLowerCase().includes(f)));
     });
 
+    // Group snapshots by job name
+    const RETENTION_LABELS = ["daily", "weekly", "monthly", "long"];
+
+    const matchSnapshotToJob = (snap: ResticSnapshot): string | null => {
+        // First try: explicit job:<name> tag
+        const jobTag = snap.tags?.find(t => t.startsWith("job:"));
+        if (jobTag) return jobTag.slice(4);
+        // Second: match by paths + repository
+        for (const job of jobs) {
+            const snapPaths = new Set(snap.paths);
+            const jobPaths = new Set(job.sources);
+            const pathMatch = [...snapPaths].every(p => jobPaths.has(p)) && snapPaths.size > 0;
+            const destName = snapshotDestMap[snap.id];
+            const dest = destinations.find(d => d.name === destName);
+            const repoMatch = dest && job.repository === dest.path;
+            if (pathMatch && repoMatch) return job.name;
+        }
+        return null;
+    };
+
+    const groups: Record<string, ResticSnapshot[]> = {};
+    for (const snap of filtered) {
+        const jobName = matchSnapshotToJob(snap) || _("Other");
+        if (!groups[jobName]) groups[jobName] = [];
+        groups[jobName].push(snap);
+    }
+
+    const getRetentionLabel = (snap: ResticSnapshot): string | null => {
+        if (!snap.tags) return null;
+        for (const tag of snap.tags) {
+            const lower = tag.toLowerCase();
+            if (RETENTION_LABELS.includes(lower)) return tag;
+        }
+        return null;
+    };
+
+    const retentionColor = (label: string): "blue" | "green" | "orange" | "purple" => {
+        switch (label.toLowerCase()) {
+            case "daily": return "blue";
+            case "weekly": return "green";
+            case "monthly": return "orange";
+            case "long": return "purple";
+            default: return "blue";
+        }
+    };
+
     return (
         <>
             {snapshots.length === 0
@@ -155,58 +201,51 @@ export const SnapshotsPage = ({ snapshotId: _snapshotId }: SnapshotsPageProps) =
                                 </Button>
                             </div>
                         </div>
-                        <div className="snapshot-cards">
-                            {filtered.map(snap => {
-                                const time = formatTime(snap.time);
-                                const destName = snapshotDestMap[snap.id] || _("Unknown");
-                                const durationTag = snap.tags?.find(t => t.startsWith("duration:"));
-                                const duration = durationTag ? durationTag.replace("duration:", "") : null;
-                                const displayTags = snap.tags?.filter(t => !t.startsWith("duration:"));
-                                return (
-                                    <Card key={snap.id} isCompact isFlat style={{ padding: "0.5rem" }}>
-                                        <CardBody style={{ padding: "0.5rem" }}>
-                                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                                <div style={{ display: "flex", gap: "0.75rem", flex: 1, alignItems: "flex-start" }}>
-                                                    <Label color="blue" style={{ fontFamily: "var(--pf-t--global--font--family--mono)", flexShrink: 0, marginTop: "0.1rem" }}>
-                                                        {snap.short_id}
-                                                    </Label>
-                                                    <div>
-                                                        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.25rem" }}>
-                                                            <span title={time.full} className="snapshot-time">
-                                                                {time.full}
-                                                            </span>
-                                                            <span className="snapshot-time">({time.relative})</span>
-                                                            {displayTags && displayTags.map(tag => (
-                                                                <Label key={tag} color="purple">{tag}</Label>
-                                                            ))}
-                                                        </div>
-                                                        <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "var(--pf-t--global--font--size--sm)", color: "var(--pf-t--global--text--color--subtle)", fontFamily: "var(--pf-t--global--font--family--mono)" }}>
-                                                            <span>{snap.hostname}:{snap.paths.join(', ')}</span>
-                                                            <span style={{ fontFamily: "var(--pf-t--global--font--family--body)" }}>→</span>
-                                                            <span style={{ fontFamily: "var(--pf-t--global--font--family--body)", fontWeight: 500 }}>{destName}</span>
-                                                            {duration && <span style={{ fontFamily: "var(--pf-t--global--font--family--body)" }}>({duration})</span>}
-                                                            <Tooltip content={_("Format: host:path → destination (h:mm)")}>
-                                                                <Icon size="sm" style={{ color: "var(--pf-t--global--icon--color--subtle)", cursor: "pointer" }}>
-                                                                    <InfoCircleIcon />
-                                                                </Icon>
-                                                            </Tooltip>
-                                                        </div>
-                                                    </div>
-                                                </div>
-
-                                                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                                                    <Button variant="primary" size="sm" onClick={() => setRestoreTarget(snap)}>
-                                                        {_("Restore")}
-                                                    </Button>
-                                                    <Button variant="danger" size="sm" onClick={() => setDeleteTarget(snap)}>
-                                                        {_("Delete")}
-                                                    </Button>
-                                                </div>
-                                            </div>
-                                        </CardBody>
-                                    </Card>
-                                );
-                            })}
+                        <div className="snapshot-groups">
+                            {Object.entries(groups).map(([jobName, snaps]) => (
+                                <Card key={jobName} isFlat>
+                                    <CardHeader>
+                                        <CardTitle>
+                                            <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                                <CheckCircleIcon color="var(--pf-t--global--color--status--success--default)" />
+                                                {jobName}
+                                            </span>
+                                        </CardTitle>
+                                    </CardHeader>
+                                    <CardBody style={{ padding: "0 1rem 1rem" }}>
+                                        <table className="snapshot-table">
+                                            <tbody>
+                                                {snaps.map(snap => {
+                                                    const time = formatTime(snap.time);
+                                                    const retention = getRetentionLabel(snap);
+                                                    return (
+                                                        <tr key={snap.id}>
+                                                            <td className="snap-id">
+                                                                <Label color="blue" isCompact style={{ fontFamily: "var(--pf-t--global--font--family--mono)" }}>
+                                                                    {snap.short_id}
+                                                                </Label>
+                                                            </td>
+                                                            <td className="snap-time">{time.full}</td>
+                                                            <td className="snap-relative">({time.relative})</td>
+                                                            <td className="snap-retention">
+                                                                {retention && <Label color={retentionColor(retention)} isCompact>{retention}</Label>}
+                                                            </td>
+                                                            <td className="snap-actions">
+                                                                <Button variant="secondary" size="sm" onClick={() => setRestoreTarget(snap)}>
+                                                                    {_("R")}
+                                                                </Button>
+                                                                <Button variant="danger" size="sm" onClick={() => setDeleteTarget(snap)}>
+                                                                    {_("D")}
+                                                                </Button>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </CardBody>
+                                </Card>
+                            ))}
                         </div>
                     </>
                 )}
