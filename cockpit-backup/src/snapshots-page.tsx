@@ -18,6 +18,7 @@ import {
     ResticSnapshot, loadDestinations, loadJobs, BackupJob, Destination, destEnvVars,
     listSnapshots, deleteSnapshot, restoreSnapshot
 } from './restic.js';
+import { SnapshotFileBrowser } from './snapshot-file-browser.js';
 
 const _ = cockpit.gettext;
 
@@ -307,6 +308,7 @@ function RestoreDialog({ snapshot, destinations, onClose, onDone }: RestoreDialo
     const [restoring, setRestoring] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState(false);
+    const [showBrowser, setShowBrowser] = useState(false);
 
     const handleRestore = async () => {
         setRestoring(true);
@@ -372,6 +374,24 @@ id="restore-include" value={include} onChange={(_ev, val) => setInclude(val)} ro
                         placeholder={"/home/user/documents\n/etc/nginx"}
                     />
                 </FormGroup>
+
+                <Button variant="secondary" onClick={() => setShowBrowser(true)} style={{ marginTop: "0.5rem", marginBottom: "1rem" }}>
+                    {_("Browse…")}
+                </Button>
+
+                {showBrowser && (
+                    <SnapshotFileBrowser
+                        snapshot={snapshot}
+                        destinations={destinations}
+                        onSelect={(paths) => {
+                            const current = include ? include.split('\n').filter(Boolean) : [];
+                            const merged = [...new Set([...current, ...paths])];
+                            setInclude(merged.join('\n'));
+                            setShowBrowser(false);
+                        }}
+                        onClose={() => setShowBrowser(false)}
+                    />
+                )}
 
                 <FormGroup
 label={_("Exclude Paths (optional)")} fieldId="restore-exclude"
