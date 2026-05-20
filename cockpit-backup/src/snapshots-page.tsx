@@ -125,15 +125,17 @@ export const SnapshotsPage = ({ snapshotId: _snapshotId }: SnapshotsPageProps) =
     // Group snapshots by job name
     const RETENTION_LABELS = ["daily", "weekly", "monthly", "long"];
 
+    const normPath = (p: string) => p.replace(/\/+$/, '');
+
     const matchSnapshotToJob = (snap: ResticSnapshot): string | null => {
         // First try: explicit job:<name> tag
         const jobTag = snap.tags?.find(t => t.startsWith("job:"));
         if (jobTag) return jobTag.slice(4);
         // Second: match by paths + repository
+        const snapNorm = snap.paths.map(normPath);
         for (const job of jobs) {
-            const snapPaths = new Set(snap.paths);
-            const jobPaths = new Set(job.sources);
-            const pathMatch = [...snapPaths].every(p => jobPaths.has(p)) && snapPaths.size > 0;
+            const jobNorm = new Set(job.sources.map(normPath));
+            const pathMatch = snapNorm.length > 0 && snapNorm.every(p => jobNorm.has(p));
             const destName = snapshotDestMap[snap.id];
             const dest = destinations.find(d => d.name === destName);
             const repoMatch = dest && job.repository === dest.path;
@@ -232,10 +234,10 @@ export const SnapshotsPage = ({ snapshotId: _snapshotId }: SnapshotsPageProps) =
                                                             </td>
                                                             <td className="snap-actions">
                                                                 <Button variant="secondary" size="sm" onClick={() => setRestoreTarget(snap)}>
-                                                                    {_("R")}
+                                                                    {_("Restore")}
                                                                 </Button>
                                                                 <Button variant="danger" size="sm" onClick={() => setDeleteTarget(snap)}>
-                                                                    {_("D")}
+                                                                    {_("Delete")}
                                                                 </Button>
                                                             </td>
                                                         </tr>

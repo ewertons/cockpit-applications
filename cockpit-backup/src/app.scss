@@ -92,11 +92,13 @@
 
     .snap-time {
         font-size: var(--pf-t--global--font--size--sm);
+        padding-right: 0.25rem;
     }
 
     .snap-relative {
         font-size: var(--pf-t--global--font--size--sm);
         color: var(--pf-t--global--text--color--subtle);
+        padding-left: 0;
     }
 
     .snap-retention {
