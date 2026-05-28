@@ -63,6 +63,8 @@ export const AccessPage = () => {
     const [newKeyLabel, setNewKeyLabel] = useState("");
     const [addError, setAddError] = useState("");
     const [adding, setAdding] = useState(false);
+    const [generating, setGenerating] = useState(false);
+    const [generatedPrivateKey, setGeneratedPrivateKey] = useState("");
 
     const loadKeys = useCallback(() => {
         setLoading(true);
@@ -129,6 +131,7 @@ export const AccessPage = () => {
                     setNewKeyContent("");
                     setNewKeyLabel("");
                     setAdding(false);
+                    setGeneratedPrivateKey("");
                     loadKeys();
                 })
                 .catch((ex: cockpit.BasicError) => {
@@ -145,6 +148,48 @@ export const AccessPage = () => {
         cockpit.file(AUTH_KEYS_PATH, { superuser: true }).replace(newContent)
                 .then(() => loadKeys())
                 .catch((ex: cockpit.BasicError) => setError(ex.message || String(ex)));
+    };
+
+    const handleGenerateKey = () => {
+        setGenerating(true);
+        setAddError("");
+        setGeneratedPrivateKey("");
+
+        const comment = newKeyLabel.trim() || "generated-key";
+        const tmpPath = "/tmp/cockpit-keygen-" + Math.random().toString(36)
+                .substring(2, 10);
+
+        cockpit.spawn(["ssh-keygen", "-t", "ed25519", "-f", tmpPath, "-N", "", "-C", comment], { err: "message" })
+                .then(() => {
+                    return Promise.all([
+                        cockpit.file(tmpPath + ".pub").read(),
+                        cockpit.file(tmpPath).read(),
+                    ]);
+                })
+                .then(([pubKey, privKey]: [string, string]) => {
+                    setNewKeyContent(pubKey.trim());
+                    setGeneratedPrivateKey(privKey);
+                    setGenerating(false);
+                    // Clean up temp files
+                    cockpit.spawn(["rm", "-f", tmpPath, tmpPath + ".pub"], { err: "ignore" });
+                })
+                .catch((ex: cockpit.BasicError) => {
+                    setAddError(ex.message || String(ex));
+                    setGenerating(false);
+                    cockpit.spawn(["rm", "-f", tmpPath, tmpPath + ".pub"], { err: "ignore" });
+                });
+    };
+
+    const downloadPrivateKey = () => {
+        const blob = new Blob([generatedPrivateKey], { type: "application/x-pem-file" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = (newKeyLabel.trim() || "id_ed25519").replace(/\s+/g, "_");
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
     };
 
     if (loading) return <Spinner aria-label={_("Loading")} />;
@@ -214,7 +259,7 @@ export const AccessPage = () => {
             </Card>
 
             {showAdd && (
-                <Modal variant="medium" isOpen onClose={() => { setShowAdd(false); setAddError("") }}>
+                <Modal variant="medium" isOpen onClose={() => { setShowAdd(false); setAddError(""); setGeneratedPrivateKey("") }}>
                     <ModalHeader title={_("Add SSH Public Key")} />
                     <ModalBody>
                         {addError && <Alert variant="danger" title={addError} isInline style={{ marginBottom: "1rem" }} />}
@@ -234,13 +279,31 @@ export const AccessPage = () => {
                                 placeholder="ssh-ed25519 AAAA... user@host"
                                 rows={4}
                             />
+                            <Button
+                                variant="secondary"
+                                onClick={handleGenerateKey}
+                                isLoading={generating}
+                                isDisabled={generating}
+                                style={{ marginTop: "0.5rem" }}
+                            >
+                                {_("Generate")}
+                            </Button>
                         </FormGroup>
+                        {generatedPrivateKey && (
+                            <Alert variant="warning" title={_("Private key generated")} isInline style={{ marginTop: "1rem" }}>
+                                {_("Download the private key now. It will not be stored on the server.")}
+                                <br />
+                                <Button variant="link" onClick={downloadPrivateKey} style={{ paddingLeft: 0, marginTop: "0.5rem" }}>
+                                    {_("Download Private Key")}
+                                </Button>
+                            </Alert>
+                        )}
                     </ModalBody>
                     <ModalFooter>
                         <Button variant="primary" onClick={handleAddKey} isLoading={adding} isDisabled={adding || !newKeyContent.trim()}>
                             {_("Add Key")}
                         </Button>
-                        <Button variant="link" onClick={() => { setShowAdd(false); setAddError("") }}>
+                        <Button variant="link" onClick={() => { setShowAdd(false); setAddError(""); setGeneratedPrivateKey("") }}>
                             {_("Cancel")}
                         </Button>
                     </ModalFooter>
