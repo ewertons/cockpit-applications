@@ -180,12 +180,20 @@ export const AccessPage = () => {
                 });
     };
 
+    const getKeyFilename = () => {
+        const label = newKeyLabel.trim();
+        if (label) {
+            return "id_ed25519_" + label.replace(/[^a-zA-Z0-9._-]/g, "_");
+        }
+        return "id_ed25519";
+    };
+
     const downloadPrivateKey = () => {
         const blob = new Blob([generatedPrivateKey], { type: "application/x-pem-file" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = (newKeyLabel.trim() || "id_ed25519").replace(/\s+/g, "_");
+        a.download = getKeyFilename();
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -296,6 +304,19 @@ export const AccessPage = () => {
                                 <Button variant="link" onClick={downloadPrivateKey} style={{ paddingLeft: 0, marginTop: "0.5rem" }}>
                                     {_("Download Private Key")}
                                 </Button>
+                                <div style={{ marginTop: "0.75rem", fontSize: "0.85rem" }}>
+                                    <strong>{_("Setup instructions:")}</strong>
+                                    <pre style={{ marginTop: "0.25rem", whiteSpace: "pre-wrap", background: "var(--pf-t--global--background--color--secondary--default)", padding: "0.5rem", borderRadius: "4px" }}>
+{`# Save the downloaded file to ~/.ssh/ and set permissions:
+mv ~/Downloads/${getKeyFilename()} ~/.ssh/
+chmod 600 ~/.ssh/${getKeyFilename()}
+
+# Add to ~/.ssh/config:
+Host ${window.location.hostname}
+    IdentityFile ~/.ssh/${getKeyFilename()}
+    User git`}
+                                    </pre>
+                                </div>
                             </Alert>
                         )}
                     </ModalBody>
