@@ -97,7 +97,12 @@ export const SSHHardeningPage = () => {
     const restartSSHD = async () => {
         setError("");
         try {
-            await cockpit.spawn(["systemctl", "restart", "sshd"], { superuser: "require" });
+            // Try 'sshd' first (RHEL/Fedora), fall back to 'ssh' (Debian/Ubuntu)
+            try {
+                await cockpit.spawn(["systemctl", "restart", "sshd"], { superuser: "require" });
+            } catch {
+                await cockpit.spawn(["systemctl", "restart", "ssh"], { superuser: "require" });
+            }
             setSuccess(_("SSHD restarted successfully"));
         } catch (e) {
             setError(String(e));

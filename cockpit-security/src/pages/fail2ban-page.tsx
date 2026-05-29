@@ -8,6 +8,9 @@ import { Switch } from "@patternfly/react-core/dist/esm/components/Switch/index.
 import { TextInput } from "@patternfly/react-core/dist/esm/components/TextInput/index.js";
 import { FormGroup } from "@patternfly/react-core/dist/esm/components/Form/index.js";
 import { DescriptionList, DescriptionListGroup, DescriptionListTerm, DescriptionListDescription } from "@patternfly/react-core/dist/esm/components/DescriptionList/index.js";
+import { HelperText, HelperTextItem } from "@patternfly/react-core/dist/esm/components/HelperText/index.js";
+import { Popover } from "@patternfly/react-core/dist/esm/components/Popover/index.js";
+import { OutlinedQuestionCircleIcon } from "@patternfly/react-icons/dist/esm/icons";
 
 import cockpit from 'cockpit';
 
@@ -31,6 +34,7 @@ export const Fail2BanPage = () => {
     const [error, setError] = useState("");
     const [success, setSuccess] = useState("");
     const [unbanIP, setUnbanIP] = useState("");
+    const [installing, setInstalling] = useState(false);
 
     useEffect(() => {
         loadStatus();
@@ -107,6 +111,35 @@ export const Fail2BanPage = () => {
         }
     };
 
+    const installFail2Ban = async () => {
+        setInstalling(true);
+        setError("");
+        try {
+            // Detect package manager and install
+            try {
+                await cockpit.spawn(["which", "dnf"], { err: "ignore" });
+                await cockpit.spawn(["dnf", "install", "-y", "fail2ban"], { superuser: "require", err: "message" });
+            } catch {
+                try {
+                    await cockpit.spawn(["which", "apt-get"], { err: "ignore" });
+                    await cockpit.spawn(["apt-get", "install", "-y", "fail2ban"], { superuser: "require", err: "message" });
+                } catch {
+                    try {
+                        await cockpit.spawn(["which", "yum"], { err: "ignore" });
+                        await cockpit.spawn(["yum", "install", "-y", "fail2ban"], { superuser: "require", err: "message" });
+                    } catch {
+                        throw new Error(_("Could not detect package manager. Install fail2ban manually."));
+                    }
+                }
+            }
+            setSuccess(_("Fail2Ban installed successfully"));
+            await loadStatus();
+        } catch (e) {
+            setError(String(e));
+        }
+        setInstalling(false);
+    };
+
     const toggleService = async () => {
         setError("");
         setSuccess("");
@@ -152,9 +185,19 @@ export const Fail2BanPage = () => {
             {error && <Alert variant="danger" title={error} className="pf-v6-u-mb-md" />}
             {success && <Alert variant="success" title={success} className="pf-v6-u-mb-md" />}
 
+            <HelperText className="pf-v6-u-mb-md">
+                <HelperTextItem variant="indeterminate">
+                    {_("Fail2Ban monitors log files for malicious activity (e.g. repeated failed login attempts) and automatically bans offending IP addresses using firewall rules.")}
+                </HelperTextItem>
+            </HelperText>
+
             {!installed
                 ? (
-                    <Alert variant="warning" title={_("Fail2Ban is not installed. Install it with your package manager.")} />
+                    <Alert variant="warning" title={_("Fail2Ban is not installed.")}>
+                        <Button variant="primary" className="pf-v6-u-mt-sm" onClick={installFail2Ban} isLoading={installing} isDisabled={installing}>
+                            {installing ? _("Installing…") : _("Install Fail2Ban")}
+                        </Button>
+                    </Alert>
                 )
                 : (
                     <>
@@ -175,11 +218,21 @@ export const Fail2BanPage = () => {
                                         </DescriptionListDescription>
                                     </DescriptionListGroup>
                                     <DescriptionListGroup>
-                                        <DescriptionListTerm>{_("Active Jails")}</DescriptionListTerm>
+                                        <DescriptionListTerm>
+                                            {_("Active Jails")}{" "}
+                                            <Popover bodyContent={_("Jails are monitoring rules. Each jail watches a specific service's log file for suspicious patterns and bans IPs that exceed the failure threshold.")}>
+                                                <Button variant="plain" isInline aria-label={_("More info about jails")}><OutlinedQuestionCircleIcon /></Button>
+                                            </Popover>
+                                        </DescriptionListTerm>
                                         <DescriptionListDescription>{jails.length}</DescriptionListDescription>
                                     </DescriptionListGroup>
                                     <DescriptionListGroup>
-                                        <DescriptionListTerm>{_("Currently Banned IPs")}</DescriptionListTerm>
+                                        <DescriptionListTerm>
+                                            {_("Currently Banned IPs")}{" "}
+                                            <Popover bodyContent={_("IP addresses currently blocked by firewall rules due to exceeding the allowed number of failed attempts within the configured time window.")}>
+                                                <Button variant="plain" isInline aria-label={_("More info about banned IPs")}><OutlinedQuestionCircleIcon /></Button>
+                                            </Popover>
+                                        </DescriptionListTerm>
                                         <DescriptionListDescription>
                                             <span className={bannedIPs.length > 0 ? "security-status-warning" : ""}>
                                                 {bannedIPs.length}
@@ -193,7 +246,12 @@ export const Fail2BanPage = () => {
                         {active && (
                             <>
                                 <Card className="pf-v6-u-mb-md">
-                                    <CardTitle>{_("Jails")}</CardTitle>
+                                    <CardTitle>
+                                        {_("Jails")}{" "}
+                                        <Popover bodyContent={_("Each jail monitors a specific service (e.g. SSH, Apache) for repeated authentication failures. When an IP exceeds the 'maxretry' threshold within the 'findtime' window, it gets banned for the configured 'bantime'.")}>
+                                            <Button variant="plain" isInline aria-label={_("More info about jails")}><OutlinedQuestionCircleIcon /></Button>
+                                        </Popover>
+                                    </CardTitle>
                                     <CardBody>
                                         <table className="pf-v6-c-table pf-m-compact">
                                             <thead>

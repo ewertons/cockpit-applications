@@ -27,6 +27,8 @@ export const AuditLogPage = () => {
     const [logSource, setLogSource] = useState<"auditd" | "journalctl">("journalctl");
     const [lineCount, setLineCount] = useState("100");
     const [selectOpen, setSelectOpen] = useState(false);
+    const [auditdInstalled, setAuditdInstalled] = useState(true);
+    const [installing, setInstalling] = useState(false);
 
     useEffect(() => {
         detectSource();
@@ -34,18 +36,62 @@ export const AuditLogPage = () => {
     }, []);
 
     const detectSource = async () => {
+        // Check if auditd unit is known to systemd (installed)
+        let installed = false;
         try {
-            const status = await cockpit.spawn(["systemctl", "is-active", "auditd"], { err: "ignore" });
-            if (status.trim() === "active") {
-                setLogSource("auditd");
-                await loadAuditd();
-            } else {
+            const loadState = await cockpit.spawn(["systemctl", "show", "-p", "LoadState", "--value", "auditd"], { err: "ignore" });
+            installed = loadState.trim() !== "not-found";
+        } catch {
+            installed = false;
+        }
+        setAuditdInstalled(installed);
+
+        if (installed) {
+            try {
+                const status = await cockpit.spawn(["systemctl", "is-active", "auditd"], { err: "ignore" });
+                if (status.trim() === "active") {
+                    setLogSource("auditd");
+                    await loadAuditd();
+                } else {
+                    await loadJournalctl();
+                }
+            } catch {
                 await loadJournalctl();
             }
-        } catch {
+        } else {
             await loadJournalctl();
         }
         setLoading(false);
+    };
+
+    const installAuditd = async () => {
+        setInstalling(true);
+        setError("");
+        try {
+            try {
+                await cockpit.spawn(["which", "dnf"], { err: "ignore" });
+                await cockpit.spawn(["dnf", "install", "-y", "audit"], { superuser: "require", err: "message" });
+            } catch {
+                try {
+                    await cockpit.spawn(["which", "apt-get"], { err: "ignore" });
+                    await cockpit.spawn(["apt-get", "install", "-y", "auditd"], { superuser: "require", err: "message" });
+                } catch {
+                    try {
+                        await cockpit.spawn(["which", "yum"], { err: "ignore" });
+                        await cockpit.spawn(["yum", "install", "-y", "audit"], { superuser: "require", err: "message" });
+                    } catch {
+                        throw new Error(_("Could not detect package manager. Install auditd manually."));
+                    }
+                }
+            }
+            await cockpit.spawn(["systemctl", "enable", "--now", "auditd"], { superuser: "require" });
+            setAuditdInstalled(true);
+            setLogSource("auditd");
+            await loadAuditd();
+        } catch (e) {
+            setError(String(e));
+        }
+        setInstalling(false);
     };
 
     const loadAuditd = async () => {
@@ -70,7 +116,11 @@ export const AuditLogPage = () => {
                 );
                 setEntries([{ timestamp: "", type: "summary", message: output }]);
             } catch {
-                setError(_("Cannot read audit logs"));
+                if (!auditdInstalled) {
+                    setError(_("Audit daemon is not installed. Use the install button above to set it up."));
+                } else {
+                    setError(_("Cannot read audit logs. Ensure auditd is running and you have sufficient permissions."));
+                }
             }
         }
     };
@@ -136,6 +186,15 @@ export const AuditLogPage = () => {
             <Title headingLevel="h1" className="pf-v6-u-mb-md">{_("Audit Logs")}</Title>
 
             {error && <Alert variant="danger" title={error} className="pf-v6-u-mb-md" />}
+
+            {!auditdInstalled && (
+                <Alert variant="warning" title={_("Audit daemon (auditd) is not installed.")} className="pf-v6-u-mb-md">
+                    <p>{_("Install auditd to enable kernel-level security auditing and detailed audit logs.")}</p>
+                    <Button variant="primary" className="pf-v6-u-mt-sm" onClick={installAuditd} isLoading={installing} isDisabled={installing}>
+                        {installing ? _("Installing…") : _("Install Audit Daemon")}
+                    </Button>
+                </Alert>
+            )}
 
             <Card className="pf-v6-u-mb-md">
                 <CardTitle>{_("Filters")}</CardTitle>
