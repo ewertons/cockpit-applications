@@ -110,6 +110,7 @@ export const RepositoriesPage = () => {
 
         cockpit.spawn(["git", "init", "--bare", "--initial-branch=main", repoPath], { superuser: "require" })
                 .then(() => cockpit.spawn(["touch", `${repoPath}/git-daemon-export-ok`], { superuser: "require", err: "ignore" }))
+                .then(() => cockpit.spawn(["git", "config", "--file", `${repoPath}/config`, "daemon.receivepack", "true"], { superuser: "require", err: "ignore" }))
                 .then(() => cockpit.spawn(["chown", "-R", "git:git", repoPath], { superuser: "require", err: "ignore" }))
                 .then(() => {
                     setShowCreate(false);

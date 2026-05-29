@@ -232,6 +232,9 @@ export const ServicesPage = () => {
                             "sed -i 's|GIT_DAEMON_BASE_PATH=.*|GIT_DAEMON_BASE_PATH=/srv/git|' /etc/default/git-daemon; " +
                             "sed -i 's|GIT_DAEMON_DIRECTORY=.*|GIT_DAEMON_DIRECTORY=/srv/git|' /etc/default/git-daemon; " +
                             "sed -i 's/GIT_DAEMON_USER=.*/GIT_DAEMON_USER=git/' /etc/default/git-daemon; " +
+                            "grep -q 'GIT_DAEMON_OPTIONS' /etc/default/git-daemon && " +
+                            "sed -i 's|GIT_DAEMON_OPTIONS=.*|GIT_DAEMON_OPTIONS=\"--enable=receive-pack\"|' /etc/default/git-daemon || " +
+                            "echo 'GIT_DAEMON_OPTIONS=\"--enable=receive-pack\"' >> /etc/default/git-daemon; " +
                             "systemctl restart git-daemon"
                         ], { superuser: "require", err: "ignore" });
                     }
