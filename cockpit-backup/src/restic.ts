@@ -545,16 +545,29 @@ export async function enableJobSchedule(job: BackupJob): Promise<void> {
         args.push("--one-file-system");
     }
 
-    // Handle SFTP SSH key
+    // Handle SFTP SSH key. Keep the connection options separate so the same
+    // options can be reused by the pre-flight reachability check below.
+    const connOpts: string[] = [];
     const sshKeyPath = dest?.ssh_key;
     if (sshKeyPath) {
         const host = sftpHost(job.repository);
         if (host) {
-            args.push("-o", `sftp.command=ssh ${host} -i ${sshKeyPath} -o StrictHostKeyChecking=accept-new -s sftp`);
+            connOpts.push("-o", `sftp.command=ssh ${host} -i ${sshKeyPath} -o StrictHostKeyChecking=accept-new -s sftp`);
         }
     }
+    args.push(...connOpts);
 
-    const execStart = `/usr/bin/restic ${args.map(a => a.includes(' ') ? `"${a}"` : a).join(' ')}`;
+    const quote = (a: string) => (a.includes(' ') ? `"${a}"` : a);
+    const execStart = `/usr/bin/restic ${args.map(quote).join(' ')}`;
+
+    // Pre-flight check: verify the repository is reachable before attempting the
+    // backup. For remote (sftp/cloud) repositories the underlying backup disk may
+    // be unmounted or disconnected, in which case restic fails with a cryptic
+    // "unable to open config file" error. This surfaces a clear message instead.
+    const precheckCmd = `/usr/bin/restic ${connOpts.map(quote).join(' ')} cat config`.trim();
+    const execStartPre =
+        `/bin/sh -c '${precheckCmd} >/dev/null 2>&1 || ` +
+        `{ echo "ERROR: backup repository $RESTIC_REPOSITORY is not reachable — is the backup disk mounted/connected on the destination?" >&2; exit 1; }'`;
 
     const serviceContent = `[Unit]
 Description=Cockpit Backup Job: ${job.name}
@@ -564,6 +577,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ${envLines.join('\n')}
+ExecStartPre=${execStartPre}
 ExecStart=${execStart}
 `;
 
