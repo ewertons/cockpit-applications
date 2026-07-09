@@ -1,0 +1,19 @@
+{
+    "requires": {
+        "cockpit": "137"
+    },
+
+    "tools": {
+        "wireguard": {
+            "label": "WireGuard",
+            "path": "index.html",
+            "order": 51
+        }
+    },
+
+    "conditions": [
+        {
+            "path-exists": "/usr/bin/wg"
+        }
+    ]
+}

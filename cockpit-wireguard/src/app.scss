@@ -1,0 +1,302 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+@use "page";
+
+.wireguard-app {
+    .pf-v6-c-page {
+        height: 100vh;
+    }
+}
+
+.pf-v6-c-page {
+    // Eliminate gap between sidebar and main content
+    --pf-v6-c-page--GridColumnGap: 0;
+    --pf-v6-c-page--ColumnGap: 0;
+    gap: 0 !important;
+    column-gap: 0 !important;
+}
+
+.pf-v6-c-page__sidebar {
+    --pf-v6-c-page__sidebar--Width: 11rem;
+    --pf-v6-c-page__sidebar--GridColumn: 11rem;
+
+    .pf-v6-c-page__sidebar-body {
+        padding-inline-end: 0;
+    }
+}
+
+.pf-v6-c-page__main {
+    flex: 1 !important;
+    min-width: 0;
+}
+
+// --- Page header (shared look with the other apps) ------------------------
+
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 1rem;
+    gap: 1rem;
+
+    .page-header-title {
+        h2 {
+            margin: 0;
+            font-size: var(--pf-t--global--font--size--2xl);
+            font-weight: var(--pf-t--global--font--weight--heading--bold);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        p {
+            margin: 0.25rem 0 0;
+            color: var(--pf-t--global--text--color--subtle);
+            font-size: var(--pf-t--global--font--size--sm);
+        }
+    }
+
+    .page-header-actions {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+    }
+}
+
+.wg-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: var(--pf-t--global--font--size--sm);
+    color: var(--pf-t--global--text--color--subtle);
+    margin-bottom: 0.25rem;
+
+    .wg-breadcrumb-sep {
+        color: var(--pf-t--global--text--color--subtle);
+    }
+}
+
+// --- Tunnel cards ----------------------------------------------------------
+
+.wg-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+    gap: 1rem;
+}
+
+.wg-card-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+
+    .wg-card-title-left {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .wg-card-name {
+        font-weight: var(--pf-t--global--font--weight--heading--bold);
+        font-size: var(--pf-t--global--font--size--md);
+    }
+}
+
+.wg-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    flex-wrap: wrap;
+
+    .wg-card-boot {
+        margin-inline: 0.25rem auto;
+    }
+}
+
+.wg-summary-card {
+    margin-bottom: 1rem;
+}
+
+// --- Forms / wizard --------------------------------------------------------
+
+.wg-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.wg-review {
+    color: var(--pf-t--global--text--color--subtle);
+}
+
+.wg-wizard-steps {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0 0 1.25rem;
+    padding: 0;
+    list-style: none;
+    flex-wrap: wrap;
+
+    .wg-wizard-step {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        color: var(--pf-t--global--text--color--subtle);
+        font-size: var(--pf-t--global--font--size--sm);
+
+        &:not(:last-child)::after {
+            content: "";
+            display: inline-block;
+            width: 1.25rem;
+            height: 1px;
+            margin-inline-start: 0.5rem;
+            background: var(--pf-t--global--border--color--default);
+        }
+
+        .wg-wizard-step-num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.5rem;
+            height: 1.5rem;
+            border-radius: 50%;
+            border: 1px solid var(--pf-t--global--border--color--default);
+            font-size: var(--pf-t--global--font--size--xs);
+        }
+
+        &.active {
+            color: var(--pf-t--global--text--color--regular);
+            font-weight: var(--pf-t--global--font--weight--body--bold);
+
+            .wg-wizard-step-num {
+                background: var(--pf-t--global--color--brand--default);
+                border-color: var(--pf-t--global--color--brand--default);
+                color: var(--pf-t--global--text--color--on-brand--default);
+            }
+        }
+
+        &.done .wg-wizard-step-num {
+            border-color: var(--pf-t--global--color--brand--default);
+            color: var(--pf-t--global--color--brand--default);
+        }
+    }
+}
+
+// --- Add client result (config + QR) --------------------------------------
+
+.wg-client-result {
+    display: flex;
+    gap: 1.5rem;
+    align-items: flex-start;
+    flex-wrap: wrap;
+
+    .wg-client-config {
+        flex: 1;
+        min-width: 18rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+
+    .wg-client-qr {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.5rem;
+
+        .wg-qr-label {
+            font-size: var(--pf-t--global--font--size--sm);
+            color: var(--pf-t--global--text--color--subtle);
+        }
+    }
+}
+
+.wg-qr {
+    // Always render on a light background so the code stays scannable in dark mode
+    background: #fff;
+    padding: 0.5rem;
+    border-radius: var(--pf-t--global--border--radius--small);
+    line-height: 0;
+
+    svg {
+        width: 200px;
+        height: 200px;
+        display: block;
+    }
+}
+
+// --- Peer table ------------------------------------------------------------
+
+.wg-peer-table {
+    width: 100%;
+    border-collapse: collapse;
+
+    th {
+        text-align: left;
+        font-size: var(--pf-t--global--font--size--sm);
+        color: var(--pf-t--global--text--color--subtle);
+        font-weight: var(--pf-t--global--font--weight--body--default);
+        padding: 0.4rem 0.5rem;
+        border-bottom: 1px solid var(--pf-t--global--border--color--default);
+    }
+
+    td {
+        padding: 0.45rem 0.5rem;
+        vertical-align: middle;
+        border-bottom: 1px solid var(--pf-t--global--border--color--nonstatus--default);
+    }
+
+    tr:last-child td {
+        border-bottom: none;
+    }
+
+    .wg-peer-actions {
+        text-align: right;
+        white-space: nowrap;
+
+        .pf-v6-c-button + .pf-v6-c-button {
+            margin-inline-start: 0.35rem;
+        }
+    }
+
+    .wg-peer-actions-col {
+        width: 1%;
+    }
+}
+
+.wg-peer-dot {
+    display: inline-block;
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 50%;
+    margin-inline-end: 0.5rem;
+    background: var(--pf-t--global--icon--color--disabled);
+    vertical-align: middle;
+
+    &.active {
+        background: var(--pf-t--global--color--status--success--default);
+    }
+}
+
+.wg-muted {
+    color: var(--pf-t--global--text--color--subtle);
+}
+
+// --- Settings / danger zone -----------------------------------------------
+
+.wg-bullets {
+    margin: 0.5rem 0 0;
+    padding-inline-start: 1.25rem;
+    color: var(--pf-t--global--text--color--subtle);
+    font-size: var(--pf-t--global--font--size--sm);
+
+    li {
+        margin-bottom: 0.25rem;
+    }
+}
+
+.wg-danger-zone {
+    margin-top: 1rem;
+    border: 1px solid var(--pf-t--global--color--status--danger--default);
+}

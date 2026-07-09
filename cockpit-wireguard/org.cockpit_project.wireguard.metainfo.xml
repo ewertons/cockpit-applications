@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="addon">
+  <id>org.cockpit_project.wireguard</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <name>WireGuard</name>
+  <summary>Cockpit extension for managing WireGuard VPN tunnels</summary>
+  <description>
+    <p>
+      A Cockpit extension for managing WireGuard VPN tunnels using the standard
+      wg-quick configuration in /etc/wireguard. It reads and writes the same
+      configuration files used by WireGuard directly, so existing tunnels are
+      shown automatically and configuration persists even if the extension is
+      removed. Includes guided wizards for creating tunnels and adding clients,
+      live connection status, and per-client configuration with QR codes.
+    </p>
+  </description>
+  <extends>org.cockpit_project.cockpit</extends>
+  <launchable type="cockpit-manifest">wireguard</launchable>
+  <url type="homepage">https://github.com/cockpit-project/cockpit-wireguard</url>
+  <url type="bugtracker">https://github.com/cockpit-project/cockpit-wireguard/issues</url>
+  <update_contact>cockpit-devel_AT_lists.fedorahosted.org</update_contact>
+  <developer id="org.cockpit-project">
+    <name>Cockpit Project</name>
+  </developer>
+</component>
