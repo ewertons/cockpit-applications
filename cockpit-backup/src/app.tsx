@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Page, PageSection, PageSidebar, PageSidebarBody } from "@patternfly/react-core/dist/esm/components/Page/index.js";
+import { Page, PageSection } from "@patternfly/react-core/dist/esm/components/Page/index.js";
+import { Sidebar, SidebarContent, SidebarPanel } from "@patternfly/react-core/dist/esm/components/Sidebar/index.js";
 import { Nav, NavItem, NavList } from "@patternfly/react-core/dist/esm/components/Nav/index.js";
 
 import cockpit from 'cockpit';
@@ -65,29 +66,25 @@ export const Application = () => {
     };
 
     const sidebar = (
-        <PageSidebar>
-            <PageSidebarBody>
-                <Nav onSelect={(_e, result) => navigate(result.itemId as string)}>
-                    <NavList>
-                        <NavItem itemId="/" isActive={location.page === "status"}>
-                            {_("Dashboard")}
-                        </NavItem>
-                        <NavItem itemId="/jobs" isActive={location.page === "jobs"}>
-                            {_("Backup Jobs")}
-                        </NavItem>
-                        <NavItem itemId="/snapshots" isActive={location.page === "snapshots"}>
-                            {_("Snapshots")}
-                        </NavItem>
-                        <NavItem itemId="/destinations" isActive={location.page === "destinations"}>
-                            {_("Destinations")}
-                        </NavItem>
-                        <NavItem itemId="/logs" isActive={location.page === "logs"}>
-                            {_("Logs")}
-                        </NavItem>
-                    </NavList>
-                </Nav>
-            </PageSidebarBody>
-        </PageSidebar>
+        <Nav onSelect={(_e, result) => navigate(result.itemId as string)}>
+            <NavList>
+                <NavItem itemId="/" isActive={location.page === "status"}>
+                    {_("Dashboard")}
+                </NavItem>
+                <NavItem itemId="/jobs" isActive={location.page === "jobs"}>
+                    {_("Backup Jobs")}
+                </NavItem>
+                <NavItem itemId="/snapshots" isActive={location.page === "snapshots"}>
+                    {_("Snapshots")}
+                </NavItem>
+                <NavItem itemId="/destinations" isActive={location.page === "destinations"}>
+                    {_("Destinations")}
+                </NavItem>
+                <NavItem itemId="/logs" isActive={location.page === "logs"}>
+                    {_("Logs")}
+                </NavItem>
+            </NavList>
+        </Nav>
     );
 
     let content;
@@ -111,11 +108,21 @@ export const Application = () => {
         content = <StatusPage />;
     }
 
+    // Page's own sidebar slot only becomes a real column above 1200px; below that
+    // it overlays the content, which an app inside a Cockpit frame practically
+    // always is. Sidebar lays out in flow instead.
     return (
         <BackupProvider>
-            <Page sidebar={sidebar}>
+            <Page className="backup-app">
                 <PageSection>
-                    {content}
+                    <Sidebar hasGutter hasNoBackground>
+                        <SidebarPanel variant="sticky" className="backup-nav">
+                            {sidebar}
+                        </SidebarPanel>
+                        <SidebarContent hasNoBackground>
+                            {content}
+                        </SidebarContent>
+                    </Sidebar>
                 </PageSection>
             </Page>
         </BackupProvider>

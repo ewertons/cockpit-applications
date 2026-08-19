@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Page, PageSection, PageSidebar, PageSidebarBody } from "@patternfly/react-core/dist/esm/components/Page/index.js";
+import { Page, PageSection } from "@patternfly/react-core/dist/esm/components/Page/index.js";
+import { Sidebar, SidebarContent, SidebarPanel } from "@patternfly/react-core/dist/esm/components/Sidebar/index.js";
 import { Nav, NavItem, NavList, NavGroup } from "@patternfly/react-core/dist/esm/components/Nav/index.js";
 
 import cockpit from 'cockpit';
@@ -87,78 +88,82 @@ export const Application = () => {
     };
 
     const sidebar = (
-        <PageSidebar>
-            <PageSidebarBody>
-                <Nav onSelect={(_e, result) => navigate(result.itemId as string)}>
-                    <NavList>
-                        <NavItem itemId="overview" isActive={currentPage === "overview"}>
-                            {_("Overview")}
-                        </NavItem>
-                    </NavList>
-                    <NavGroup title={_("Network")}>
-                        <NavList>
-                            <NavItem itemId="firewall" isActive={currentPage === "firewall"}>
-                                {_("Firewall")}
-                            </NavItem>
-                            <NavItem itemId="network-monitor" isActive={currentPage === "network-monitor"}>
-                                {_("Network Monitor")}
-                            </NavItem>
-                            <NavItem itemId="open-ports" isActive={currentPage === "open-ports"}>
-                                {_("Open Ports")}
-                            </NavItem>
-                            <NavItem itemId="ntopng" isActive={currentPage === "ntopng"}>
-                                {_("Traffic Monitor")}
-                            </NavItem>
-                        </NavList>
-                    </NavGroup>
-                    <NavGroup title={_("Access Control")}>
-                        <NavList>
-                            <NavItem itemId="selinux" isActive={currentPage === "selinux"}>
-                                {_("SELinux / AppArmor")}
-                            </NavItem>
-                            <NavItem itemId="fail2ban" isActive={currentPage === "fail2ban"}>
-                                {_("Fail2Ban")}
-                            </NavItem>
-                            <NavItem itemId="ssh-hardening" isActive={currentPage === "ssh-hardening"}>
-                                {_("SSH Hardening")}
-                            </NavItem>
-                            <NavItem itemId="user-security" isActive={currentPage === "user-security"}>
-                                {_("Users & Auth")}
-                            </NavItem>
-                        </NavList>
-                    </NavGroup>
-                    <NavGroup title={_("Monitoring")}>
-                        <NavList>
-                            <NavItem itemId="audit-log" isActive={currentPage === "audit-log"}>
-                                {_("Audit Logs")}
-                            </NavItem>
-                            <NavItem itemId="intrusion-detection" isActive={currentPage === "intrusion-detection"}>
-                                {_("Intrusion Detection")}
-                            </NavItem>
-                        </NavList>
-                    </NavGroup>
-                    <NavGroup title={_("Maintenance")}>
-                        <NavList>
-                            <NavItem itemId="system-updates" isActive={currentPage === "system-updates"}>
-                                {_("System Updates")}
-                            </NavItem>
-                            <NavItem itemId="certificates" isActive={currentPage === "certificates"}>
-                                {_("Certificates")}
-                            </NavItem>
-                        </NavList>
-                    </NavGroup>
-                </Nav>
-            </PageSidebarBody>
-        </PageSidebar>
+        <Nav onSelect={(_e, result) => navigate(result.itemId as string)}>
+            <NavList>
+                <NavItem itemId="overview" isActive={currentPage === "overview"}>
+                    {_("Overview")}
+                </NavItem>
+            </NavList>
+            <NavGroup title={_("Network")}>
+                <NavList>
+                    <NavItem itemId="firewall" isActive={currentPage === "firewall"}>
+                        {_("Firewall")}
+                    </NavItem>
+                    <NavItem itemId="network-monitor" isActive={currentPage === "network-monitor"}>
+                        {_("Network Monitor")}
+                    </NavItem>
+                    <NavItem itemId="open-ports" isActive={currentPage === "open-ports"}>
+                        {_("Open Ports")}
+                    </NavItem>
+                    <NavItem itemId="ntopng" isActive={currentPage === "ntopng"}>
+                        {_("Traffic Monitor")}
+                    </NavItem>
+                </NavList>
+            </NavGroup>
+            <NavGroup title={_("Access Control")}>
+                <NavList>
+                    <NavItem itemId="selinux" isActive={currentPage === "selinux"}>
+                        {_("SELinux / AppArmor")}
+                    </NavItem>
+                    <NavItem itemId="fail2ban" isActive={currentPage === "fail2ban"}>
+                        {_("Fail2Ban")}
+                    </NavItem>
+                    <NavItem itemId="ssh-hardening" isActive={currentPage === "ssh-hardening"}>
+                        {_("SSH Hardening")}
+                    </NavItem>
+                    <NavItem itemId="user-security" isActive={currentPage === "user-security"}>
+                        {_("Users & Auth")}
+                    </NavItem>
+                </NavList>
+            </NavGroup>
+            <NavGroup title={_("Monitoring")}>
+                <NavList>
+                    <NavItem itemId="audit-log" isActive={currentPage === "audit-log"}>
+                        {_("Audit Logs")}
+                    </NavItem>
+                    <NavItem itemId="intrusion-detection" isActive={currentPage === "intrusion-detection"}>
+                        {_("Intrusion Detection")}
+                    </NavItem>
+                </NavList>
+            </NavGroup>
+            <NavGroup title={_("Maintenance")}>
+                <NavList>
+                    <NavItem itemId="system-updates" isActive={currentPage === "system-updates"}>
+                        {_("System Updates")}
+                    </NavItem>
+                    <NavItem itemId="certificates" isActive={currentPage === "certificates"}>
+                        {_("Certificates")}
+                    </NavItem>
+                </NavList>
+            </NavGroup>
+        </Nav>
     );
 
+    // Page's own sidebar slot only becomes a real column above 1200px; below that
+    // it overlays the content, which an app inside a Cockpit frame practically
+    // always is. Sidebar lays out in flow instead.
     return (
-        <div className="security-app">
-            <Page sidebar={sidebar}>
-                <PageSection>
-                    {renderPage()}
-                </PageSection>
-            </Page>
-        </div>
+        <Page className="security-app">
+            <PageSection>
+                <Sidebar hasGutter hasNoBackground>
+                    <SidebarPanel variant="sticky" className="security-nav">
+                        {sidebar}
+                    </SidebarPanel>
+                    <SidebarContent hasNoBackground>
+                        {renderPage()}
+                    </SidebarContent>
+                </Sidebar>
+            </PageSection>
+        </Page>
     );
 };

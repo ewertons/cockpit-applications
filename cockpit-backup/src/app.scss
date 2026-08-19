@@ -2,31 +2,30 @@
 @use "page";
 
 .backup-app {
-    .pf-v6-c-page {
+    // No PageSidebar is rendered, but above 1200px Page's grid still reserves a
+    // column for one, which pushes the content over and squeezes it.
+    &.pf-v6-c-page {
         height: 100vh;
+        grid-template-areas: "header" "main";
+        grid-template-columns: 1fr;
     }
-}
 
-.pf-v6-c-page {
-    // Eliminate gap between sidebar and main content
-    --pf-v6-c-page--GridColumnGap: 0;
-    --pf-v6-c-page--ColumnGap: 0;
-    gap: 0 !important;
-    column-gap: 0 !important;
-}
-
-.pf-v6-c-page__sidebar {
-    --pf-v6-c-page__sidebar--Width: 11rem;
-    --pf-v6-c-page__sidebar--GridColumn: 11rem;
-
-    .pf-v6-c-page__sidebar-body {
-        padding-inline-end: 0;
+    // Flex items default to min-width:auto, so the content column would keep the
+    // intrinsic width of its widest table instead of shrinking, and spill past
+    // the frame.
+    .pf-v6-c-sidebar__main,
+    .pf-v6-c-sidebar__content {
+        min-width: 0;
     }
-}
 
-.pf-v6-c-page__main {
-    flex: 1 !important;
-    min-width: 0;
+    // Long unbreakable values must not force the column wider than the frame.
+    .pf-v6-c-sidebar__content {
+        overflow-wrap: anywhere;
+    }
+
+    .backup-nav {
+        --pf-v6-c-sidebar__panel--md--FlexBasis: 12rem;
+    }
 }
 
 .page-header {

@@ -2,8 +2,29 @@
 @use "page.scss";
 
 .git-server-app {
-    .pf-v6-c-page {
+    // No PageSidebar is rendered, but above 1200px Page's grid still reserves a
+    // column for one, which pushes the content over and squeezes it.
+    &.pf-v6-c-page {
         height: 100vh;
+        grid-template-areas: "header" "main";
+        grid-template-columns: 1fr;
+    }
+
+    // Flex items default to min-width:auto, so the content column would keep the
+    // intrinsic width of its widest child instead of shrinking, and spill past
+    // the frame.
+    .pf-v6-c-sidebar__main,
+    .pf-v6-c-sidebar__content {
+        min-width: 0;
+    }
+
+    // Keys, hashes and clone URLs are unbreakable words; let them wrap.
+    .pf-v6-c-sidebar__content {
+        overflow-wrap: anywhere;
+    }
+
+    .git-nav {
+        --pf-v6-c-sidebar__panel--md--FlexBasis: 12rem;
     }
 }
 

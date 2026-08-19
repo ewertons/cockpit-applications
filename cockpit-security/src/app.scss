@@ -1,9 +1,29 @@
 @use "page";
 
 .security-app {
-    .pf-v6-c-page {
+    // No PageSidebar is rendered, but above 1200px Page's grid still reserves a
+    // column for one, which pushes the content over and squeezes it.
+    &.pf-v6-c-page {
         height: 100vh;
-        --pf-v6-c-page__sidebar--Width--base: 13.5rem;
+        grid-template-areas: "header" "main";
+        grid-template-columns: 1fr;
+    }
+
+    // Flex items default to min-width:auto, so the content column would keep the
+    // intrinsic width of its widest table instead of shrinking, and spill past
+    // the frame.
+    .pf-v6-c-sidebar__main,
+    .pf-v6-c-sidebar__content {
+        min-width: 0;
+    }
+
+    // Addresses, hashes and paths are unbreakable words; let them wrap.
+    .pf-v6-c-sidebar__content {
+        overflow-wrap: anywhere;
+    }
+
+    .security-nav {
+        --pf-v6-c-sidebar__panel--md--FlexBasis: 14rem;
     }
 }
 

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Page, PageSection, PageSidebar, PageSidebarBody } from "@patternfly/react-core/dist/esm/components/Page/index.js";
+import { Page, PageSection } from "@patternfly/react-core/dist/esm/components/Page/index.js";
+import { Sidebar, SidebarContent, SidebarPanel } from "@patternfly/react-core/dist/esm/components/Sidebar/index.js";
 import { Nav, NavItem, NavList } from "@patternfly/react-core/dist/esm/components/Nav/index.js";
 
 import cockpit from 'cockpit';
@@ -68,23 +69,19 @@ export const Application = () => {
     };
 
     const sidebar = (
-        <PageSidebar>
-            <PageSidebarBody>
-                <Nav onSelect={(_e, result) => navigate(result.itemId as string)}>
-                    <NavList>
-                        <NavItem itemId="/" isActive={location.page === "repositories"}>
-                            {_("Repositories")}
-                        </NavItem>
-                        <NavItem itemId="/services" isActive={location.page === "services"}>
-                            {_("Services")}
-                        </NavItem>
-                        <NavItem itemId="/access" isActive={location.page === "access"}>
-                            {_("Access Control")}
-                        </NavItem>
-                    </NavList>
-                </Nav>
-            </PageSidebarBody>
-        </PageSidebar>
+        <Nav onSelect={(_e, result) => navigate(result.itemId as string)}>
+            <NavList>
+                <NavItem itemId="/" isActive={location.page === "repositories"}>
+                    {_("Repositories")}
+                </NavItem>
+                <NavItem itemId="/services" isActive={location.page === "services"}>
+                    {_("Services")}
+                </NavItem>
+                <NavItem itemId="/access" isActive={location.page === "access"}>
+                    {_("Access Control")}
+                </NavItem>
+            </NavList>
+        </Nav>
     );
 
     let content;
@@ -108,10 +105,20 @@ export const Application = () => {
         content = <RepositoriesPage />;
     }
 
+    // Page's own sidebar slot only becomes a real column above 1200px; below that
+    // it overlays the content, which an app inside a Cockpit frame practically
+    // always is. Sidebar lays out in flow instead.
     return (
-        <Page sidebar={sidebar}>
+        <Page className="git-server-app">
             <PageSection>
-                {content}
+                <Sidebar hasGutter hasNoBackground>
+                    <SidebarPanel variant="sticky" className="git-nav">
+                        {sidebar}
+                    </SidebarPanel>
+                    <SidebarContent hasNoBackground>
+                        {content}
+                    </SidebarContent>
+                </Sidebar>
             </PageSection>
         </Page>
     );

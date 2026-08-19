@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Nav, NavItem, NavList } from "@patternfly/react-core/dist/esm/components/Nav/index.js";
-import { Page, PageSection, PageSidebar, PageSidebarBody } from "@patternfly/react-core/dist/esm/components/Page/index.js";
+import { Page, PageSection } from "@patternfly/react-core/dist/esm/components/Page/index.js";
+import { Sidebar, SidebarContent, SidebarPanel } from "@patternfly/react-core/dist/esm/components/Sidebar/index.js";
 
 import cockpit from 'cockpit';
 
@@ -45,20 +46,16 @@ export const Application = () => {
     };
 
     const sidebar = (
-        <PageSidebar>
-            <PageSidebarBody>
-                <Nav onSelect={(_e, result) => navigate(result.itemId as string)}>
-                    <NavList>
-                        <NavItem itemId="tunnels" isActive={location.page === "tunnels" || location.page === "detail"}>
-                            {_("Tunnels")}
-                        </NavItem>
-                        <NavItem itemId="settings" isActive={location.page === "settings"}>
-                            {_("Settings")}
-                        </NavItem>
-                    </NavList>
-                </Nav>
-            </PageSidebarBody>
-        </PageSidebar>
+        <Nav onSelect={(_e, result) => navigate(result.itemId as string)}>
+            <NavList>
+                <NavItem itemId="tunnels" isActive={location.page === "tunnels" || location.page === "detail"}>
+                    {_("Tunnels")}
+                </NavItem>
+                <NavItem itemId="settings" isActive={location.page === "settings"}>
+                    {_("Settings")}
+                </NavItem>
+            </NavList>
+        </Nav>
     );
 
     let content;
@@ -74,13 +71,21 @@ export const Application = () => {
         content = <TunnelsPage />;
     }
 
+    // Page's own sidebar slot only becomes a real column above 1200px; below that
+    // it overlays the content, which an app inside a Cockpit frame practically
+    // always is. Sidebar lays out in flow instead.
     return (
-        <div className="wireguard-app">
-            <Page sidebar={sidebar}>
-                <PageSection>
-                    {content}
-                </PageSection>
-            </Page>
-        </div>
+        <Page className="wireguard-app">
+            <PageSection>
+                <Sidebar hasGutter hasNoBackground>
+                    <SidebarPanel variant="sticky" className="wg-nav">
+                        {sidebar}
+                    </SidebarPanel>
+                    <SidebarContent hasNoBackground>
+                        {content}
+                    </SidebarContent>
+                </Sidebar>
+            </PageSection>
+        </Page>
     );
 };
