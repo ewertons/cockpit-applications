@@ -1,0 +1,15 @@
+pkgname=cockpit-openssh
+pkgver=VERSION
+pkgrel=1
+pkgdesc='Cockpit OpenSSH Server Management Extension'
+arch=('x86_64')
+url='https://github.com/cockpit-project/cockpit-openssh'
+license=(LGPL)
+source=("SOURCE")
+sha256sums=('SKIP')
+
+package() {
+  depends=(cockpit)
+  cd $pkgname
+  make DESTDIR="$pkgdir" install PREFIX=/usr
+}

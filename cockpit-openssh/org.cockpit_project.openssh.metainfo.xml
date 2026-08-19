@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="addon">
+  <id>org.cockpit_project.openssh</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <name>OpenSSH</name>
+  <summary>Cockpit extension for OpenSSH server management</summary>
+  <description>
+    <p>
+      A Cockpit extension for managing the OpenSSH server on a Linux host.
+      Provides validated sshd_config editing through a drop-in file with
+      automatic rollback, per-user authorized_keys management with client key
+      generation, and known_hosts inspection with a report-only staleness check.
+    </p>
+  </description>
+  <extends>org.cockpit_project.cockpit</extends>
+  <launchable type="cockpit-manifest">openssh</launchable>
+  <url type="homepage">https://github.com/cockpit-project/cockpit-openssh</url>
+  <url type="bugtracker">https://github.com/cockpit-project/cockpit-openssh/issues</url>
+  <update_contact>cockpit-devel_AT_lists.fedorahosted.org</update_contact>
+  <developer id="org.cockpit-project">
+    <name>Cockpit Project</name>
+  </developer>
+</component>

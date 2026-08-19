@@ -1,0 +1,104 @@
+@use "page";
+
+.openssh-app {
+    // No PageSidebar is rendered, but above 1200px Page's grid still reserves a
+    // column for one, which pushes the content over and squeezes it.
+    &.pf-v6-c-page {
+        grid-template-areas: "header" "main";
+        grid-template-columns: 1fr;
+    }
+
+    // Flex items default to min-width:auto, so the content column would keep the
+    // intrinsic width of its widest table instead of shrinking, and spill past
+    // the frame.
+    .pf-v6-c-sidebar__main,
+    .pf-v6-c-sidebar__content {
+        min-width: 0;
+    }
+
+    // Fingerprints and key blobs are unbreakable words; let them wrap rather
+    // than force the table wider than the frame.
+    .ssh-mono {
+        font-family: var(--pf-t--global--font--family--mono);
+        font-size: var(--pf-t--global--font--size--sm);
+        overflow-wrap: anywhere;
+    }
+
+    // Vertical rhythm: nothing inside a card or dialog should sit flush against
+    // the block next to it. Neutralising the children's own margins first keeps
+    // this from stacking with PatternFly's spacing utilities.
+    .pf-v6-c-card__body,
+    .pf-v6-c-modal-box__body {
+        > * {
+            margin-block: 0;
+        }
+
+        > * + * {
+            margin-block-start: var(--pf-t--global--spacer--lg);
+        }
+    }
+
+    // Keep the in-page navigation a sensible width when the frame is wide
+    // enough to place it beside the content.
+    .ssh-nav {
+        --pf-v6-c-sidebar__panel--md--FlexBasis: 14rem;
+    }
+
+    .ssh-snippet {
+        padding: var(--pf-t--global--spacer--md);
+        border-radius: var(--pf-t--global--border--radius--small);
+        background-color: var(--pf-t--global--background--color--secondary--default);
+        font-family: var(--pf-t--global--font--family--mono);
+        font-size: var(--pf-t--global--font--size--sm);
+        white-space: pre-wrap;
+        overflow-x: auto;
+    }
+
+    .ssh-provenance {
+        margin-block-start: var(--pf-t--global--spacer--xs);
+        color: var(--pf-t--global--text--color--subtle);
+        font-size: var(--pf-t--global--font--size--xs);
+        line-height: var(--pf-t--global--font--line-height--body);
+    }
+
+    // Rows of buttons and filter controls need more room than plain prose, both
+    // above and below. Declared after the rhythm rule so they win on equal
+    // specificity.
+    .ssh-actions,
+    .ssh-toolbar {
+        margin-block: var(--pf-t--global--spacer--xl);
+        row-gap: var(--pf-t--global--spacer--md);
+    }
+
+    // A button rendered inside an Alert body, which otherwise touches its border.
+    .ssh-alert-actions {
+        margin-block-start: var(--pf-t--global--spacer--md);
+    }
+
+    // Keep the horizontal form's rows apart.
+    .pf-v6-c-form {
+        --pf-v6-c-form--GridGap: var(--pf-t--global--spacer--lg);
+    }
+
+    .ssh-wizard-steps {
+        display: flex;
+        gap: var(--pf-t--global--spacer--md);
+        margin-block-end: var(--pf-t--global--spacer--lg);
+        padding: 0;
+        list-style: none;
+
+        li {
+            color: var(--pf-t--global--text--color--subtle);
+            font-size: var(--pf-t--global--font--size--sm);
+
+            &.active {
+                color: var(--pf-t--global--text--color--regular);
+                font-weight: var(--pf-t--global--font--weight--body--bold);
+            }
+
+            &.done {
+                color: var(--pf-t--global--text--color--status--success--default);
+            }
+        }
+    }
+}

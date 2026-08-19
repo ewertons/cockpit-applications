@@ -1,0 +1,19 @@
+{
+    "requires": {
+        "cockpit": "137"
+    },
+
+    "tools": {
+        "openssh": {
+            "label": "OpenSSH",
+            "path": "index.html",
+            "order": 56
+        }
+    },
+
+    "conditions": [
+        {
+            "path-exists": "/usr/bin/ssh-keygen"
+        }
+    ]
+}
