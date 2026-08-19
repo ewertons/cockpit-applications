@@ -38,26 +38,59 @@ interface ClientConfigViewProps {
     fileName: string; // without the .conf suffix
 }
 
+// A same-origin URL, not a blob: inside Cockpit's iframe Firefox treats blob
+// downloads as a frame navigation and blocks them under "frame-src 'self'".
+function downloadUrl(path: string, filename: string): string {
+    const query = window.btoa(JSON.stringify({
+        payload: "fsread1",
+        binary: "raw",
+        path,
+        external: {
+            "content-disposition": `attachment; filename="${filename}"`,
+            "content-type": "text/plain",
+        },
+    }));
+    const prefix = new URL(cockpit.transport.uri("channel/" + cockpit.transport.csrf_token)).pathname;
+    return `${prefix}?${query}`;
+}
+
 // Displays a client configuration with copy, download, and a scannable QR code.
 export function ClientConfigView({ config, fileName }: ClientConfigViewProps) {
-    const [url, setUrl] = useState<string | null>(null);
+    const [path, setPath] = useState("");
 
+    // Downloading over a Cockpit channel needs the config to exist as a file, so
+    // it is staged in a private tmpfs directory for as long as this is shown.
     useEffect(() => {
-        const objectUrl = URL.createObjectURL(new Blob([config], { type: "text/plain" }));
-        setUrl(objectUrl);
-        return () => URL.revokeObjectURL(objectUrl);
-    }, [config]);
+        let dir = "";
+        let cancelled = false;
+        const discard = () => {
+            if (dir)
+                cockpit.spawn(["rm", "-rf", dir], { err: "ignore" });
+            dir = "";
+        };
 
-    const download = () => {
-        if (!url)
-            return;
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${fileName}.conf`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-    };
+        const proc = cockpit.spawn(
+            ["/bin/sh", "-c",
+                'set -e; d=$(mktemp -d -p /dev/shm cockpit-wireguard.XXXXXXXX 2>/dev/null || mktemp -d); ' +
+                'umask 077; cat > "$d/$1.conf"; printf "%s\\n" "$d"',
+                "sh", fileName],
+            { err: "message" });
+        proc.input(config);
+        proc.then((out: string) => {
+            dir = out.trim();
+            if (cancelled)
+                discard();
+            else
+                setPath(`${dir}/${fileName}.conf`);
+        })
+                .catch(() => undefined);
+
+        return () => {
+            cancelled = true;
+            setPath("");
+            discard();
+        };
+    }, [config, fileName]);
 
     return (
         <div className="wg-client-result">
@@ -70,7 +103,13 @@ export function ClientConfigView({ config, fileName }: ClientConfigViewProps) {
                         {config}
                     </ClipboardCopy>
                 </FormGroup>
-                <Button variant="secondary" onClick={download} isDisabled={!url}>
+                <Button
+                    variant="secondary"
+                    component="a"
+                    href={path ? downloadUrl(path, `${fileName}.conf`) : ""}
+                    download={`${fileName}.conf`}
+                    isDisabled={!path}
+                >
                     {cockpit.format(_("Download $0.conf"), fileName)}
                 </Button>
             </div>

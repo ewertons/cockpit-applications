@@ -65,6 +65,7 @@ export const AccessPage = () => {
     const [adding, setAdding] = useState(false);
     const [generating, setGenerating] = useState(false);
     const [generatedPrivateKey, setGeneratedPrivateKey] = useState("");
+    const [keyDir, setKeyDir] = useState("");
 
     const loadKeys = useCallback(() => {
         setLoading(true);
@@ -127,6 +128,9 @@ export const AccessPage = () => {
                             .then(() => cockpit.spawn(["chown", "-R", gitOwner, "/srv/git/.ssh"], { superuser: "require" }));
                 })
                 .then(() => {
+                    if (keyDir)
+                        cockpit.spawn(["rm", "-rf", keyDir], { err: "ignore" });
+                    setKeyDir("");
                     setShowAdd(false);
                     setNewKeyContent("");
                     setNewKeyLabel("");
@@ -156,28 +160,46 @@ export const AccessPage = () => {
         setGeneratedPrivateKey("");
 
         const comment = newKeyLabel.trim() || "generated-key";
-        const tmpPath = "/tmp/cockpit-keygen-" + Math.random().toString(36)
-                .substring(2, 10);
+        // A private tmpfs directory: the key must not land on persistent storage,
+        // and mktemp avoids the predictable name a guessable path would have.
+        const script = [
+            'set -e',
+            'd=$(mktemp -d -p /dev/shm cockpit-git-keygen.XXXXXXXX 2>/dev/null || mktemp -d)',
+            'trap \'rm -rf "$d"\' EXIT INT TERM HUP PIPE',
+            'ssh-keygen -q -t ed25519 -f "$d/key" -N "" -C "$1"',
+            'printf "%s\\n" "$d"',
+            'trap - EXIT',
+        ].join("\n");
 
-        cockpit.spawn(["ssh-keygen", "-t", "ed25519", "-f", tmpPath, "-N", "", "-C", comment], { err: "message" })
-                .then(() => {
+        cockpit.spawn(["/bin/sh", "-c", script, "sh", comment], { err: "message" })
+                .then((out: string) => {
+                    const dir = out.trim();
                     return Promise.all([
-                        cockpit.file(tmpPath + ".pub").read(),
-                        cockpit.file(tmpPath).read(),
+                        cockpit.file(dir + "/key.pub").read(),
+                        cockpit.file(dir + "/key").read(),
+                        Promise.resolve(dir),
                     ]);
                 })
-                .then(([pubKey, privKey]: [string, string]) => {
+                .then(([pubKey, privKey, dir]: [string, string, string]) => {
                     setNewKeyContent(pubKey.trim());
                     setGeneratedPrivateKey(privKey);
+                    // Kept until the dialog closes so the browser can download it.
+                    setKeyDir(dir);
                     setGenerating(false);
-                    // Clean up temp files
-                    cockpit.spawn(["rm", "-f", tmpPath, tmpPath + ".pub"], { err: "ignore" });
                 })
                 .catch((ex: cockpit.BasicError) => {
                     setAddError(ex.message || String(ex));
                     setGenerating(false);
-                    cockpit.spawn(["rm", "-f", tmpPath, tmpPath + ".pub"], { err: "ignore" });
                 });
+    };
+
+    const closeAdd = () => {
+        if (keyDir)
+            cockpit.spawn(["rm", "-rf", keyDir], { err: "ignore" });
+        setKeyDir("");
+        setShowAdd(false);
+        setAddError("");
+        setGeneratedPrivateKey("");
     };
 
     const getKeyFilename = () => {
@@ -188,17 +210,32 @@ export const AccessPage = () => {
         return "id_ed25519";
     };
 
-    const downloadPrivateKey = () => {
-        const blob = new Blob([generatedPrivateKey], { type: "application/x-pem-file" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = getKeyFilename();
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+    // A same-origin URL, not a blob: inside Cockpit's iframe Firefox treats blob
+    // downloads as a frame navigation and blocks them under "frame-src 'self'".
+    const privateKeyUrl = () => {
+        const query = window.btoa(JSON.stringify({
+            payload: "fsread1",
+            binary: "raw",
+            path: keyDir + "/key",
+            external: {
+                "content-disposition": `attachment; filename="${getKeyFilename()}"`,
+                "content-type": "application/octet-stream",
+            },
+        }));
+        const prefix = new URL(cockpit.transport.uri("channel/" + cockpit.transport.csrf_token)).pathname;
+        return `${prefix}?${query}`;
     };
+
+    const setupInstructions = [
+        "# Save the downloaded file to ~/.ssh/ and set permissions:",
+        `mv ~/Downloads/${getKeyFilename()} ~/.ssh/`,
+        `chmod 600 ~/.ssh/${getKeyFilename()}`,
+        "",
+        "# Add to ~/.ssh/config:",
+        `Host ${window.location.hostname}`,
+        `    IdentityFile ~/.ssh/${getKeyFilename()}`,
+        "    User git",
+    ].join("\n");
 
     if (loading) return <Spinner aria-label={_("Loading")} />;
 
@@ -267,7 +304,7 @@ export const AccessPage = () => {
             </Card>
 
             {showAdd && (
-                <Modal variant="medium" isOpen onClose={() => { setShowAdd(false); setAddError(""); setGeneratedPrivateKey("") }}>
+                <Modal variant="medium" isOpen onClose={closeAdd}>
                     <ModalHeader title={_("Add SSH Public Key")} />
                     <ModalBody>
                         {addError && <Alert variant="danger" title={addError} isInline style={{ marginBottom: "1rem" }} />}
@@ -299,22 +336,21 @@ export const AccessPage = () => {
                         </FormGroup>
                         {generatedPrivateKey && (
                             <Alert variant="warning" title={_("Private key generated")} isInline style={{ marginTop: "1rem" }}>
-                                {_("Download the private key now. It will not be stored on the server.")}
+                                {_("Download the private key now. It is discarded when this dialog closes.")}
                                 <br />
-                                <Button variant="link" onClick={downloadPrivateKey} style={{ paddingLeft: 0, marginTop: "0.5rem" }}>
+                                <Button
+                                    variant="link"
+                                    component="a"
+                                    href={privateKeyUrl()}
+                                    download={getKeyFilename()}
+                                    style={{ paddingLeft: 0, marginTop: "0.5rem" }}
+                                >
                                     {_("Download Private Key")}
                                 </Button>
                                 <div style={{ marginTop: "0.75rem", fontSize: "0.85rem" }}>
                                     <strong>{_("Setup instructions:")}</strong>
                                     <pre style={{ marginTop: "0.25rem", whiteSpace: "pre-wrap", background: "var(--pf-t--global--background--color--secondary--default)", padding: "0.5rem", borderRadius: "4px" }}>
-{`# Save the downloaded file to ~/.ssh/ and set permissions:
-mv ~/Downloads/${getKeyFilename()} ~/.ssh/
-chmod 600 ~/.ssh/${getKeyFilename()}
-
-# Add to ~/.ssh/config:
-Host ${window.location.hostname}
-    IdentityFile ~/.ssh/${getKeyFilename()}
-    User git`}
+                                        {setupInstructions}
                                     </pre>
                                 </div>
                             </Alert>
@@ -324,7 +360,7 @@ Host ${window.location.hostname}
                         <Button variant="primary" onClick={handleAddKey} isLoading={adding} isDisabled={adding || !newKeyContent.trim()}>
                             {_("Add Key")}
                         </Button>
-                        <Button variant="link" onClick={() => { setShowAdd(false); setAddError(""); setGeneratedPrivateKey("") }}>
+                        <Button variant="link" onClick={closeAdd}>
                             {_("Cancel")}
                         </Button>
                     </ModalFooter>

@@ -305,11 +305,16 @@ export const OverviewPage = () => {
                 <CardTitle>{_("Services Status")}</CardTitle>
                 <CardBody>
                     {serviceRows.map((svc, i) => (
-                        <div key={svc.page} style={{
-                            display: "flex", justifyContent: "space-between", alignItems: "center",
-                            padding: "0.625rem 0",
-                            borderBottom: i < serviceRows.length - 1 ? "1px solid var(--pf-t--global--border--color--default)" : undefined
-                        }}>
+                        <div
+                            key={svc.page}
+                            style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                                padding: "0.625rem 0",
+                                borderBottom: i < serviceRows.length - 1 ? "1px solid var(--pf-t--global--border--color--default)" : undefined
+                            }}
+                        >
                             <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
                                 <strong>{svc.name}</strong>
                                 {statusLabel(svc.status)}
@@ -319,11 +324,15 @@ export const OverviewPage = () => {
                             </Button>
                         </div>
                     ))}
-                    <div style={{
-                        display: "flex", justifyContent: "space-between", alignItems: "center",
-                        padding: "0.625rem 0",
-                        borderTop: "1px solid var(--pf-t--global--border--color--default)"
-                    }}>
+                    <div
+                        style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            padding: "0.625rem 0",
+                            borderTop: "1px solid var(--pf-t--global--border--color--default)"
+                        }}
+                    >
                         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
                             <strong>{_("MAC System")}</strong>
                             {status!.selinux.includes("Enforcing") || status!.selinux.includes("AppArmor")
