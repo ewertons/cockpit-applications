@@ -41,3 +41,9 @@ jobs:
         run: |
           make bots
           bots/cockpit-lib-update
+
+      - name: Run cockpit-lib-update (cockpit-openssh)
+        working-directory: cockpit-openssh
+        run: |
+          make bots
+          bots/cockpit-lib-update

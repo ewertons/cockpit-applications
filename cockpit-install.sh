@@ -15,8 +15,8 @@ for arg in "$@"; do
             echo "Usage: sudo $0 [--add-applications]"
             echo ""
             echo "  --add-applications   Also build and install all cockpit applications"
-            echo "                       (cockpit-backup, cockpit-git-server, cockpit-security,"
-            echo "                       cockpit-wireguard)"
+            echo "                       (cockpit-backup, cockpit-git-server, cockpit-openssh,"
+            echo "                       cockpit-security, cockpit-wireguard)"
             exit 0
             ;;
         *)
@@ -96,7 +96,7 @@ if $INSTALL_APPS; then
     echo "==> Installing all cockpit applications..."
     echo "============================================"
 
-    APPS=("cockpit-backup" "cockpit-git-server" "cockpit-security" "cockpit-wireguard")
+    APPS=("cockpit-backup" "cockpit-git-server" "cockpit-openssh" "cockpit-security" "cockpit-wireguard")
 
     for app in "${APPS[@]}"; do
         APP_DIR="$SCRIPT_DIR/$app"

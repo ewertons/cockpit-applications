@@ -45,3 +45,9 @@ jobs:
         run: |
           make bots
           bots/tasks-container-update
+
+      - name: Run tasks-container-update (cockpit-openssh)
+        working-directory: cockpit-openssh
+        run: |
+          make bots
+          bots/tasks-container-update
