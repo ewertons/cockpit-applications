@@ -146,6 +146,34 @@ updates:
           - "@types*"
           - "types*"
 
+  - package-ecosystem: "npm"
+    directory: "/cockpit-wireguard"
+    schedule:
+      interval: "daily"
+      time: "22:00"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 3
+    groups:
+      eslint:
+        patterns:
+          - "eslint*"
+      esbuild:
+        patterns:
+          - "esbuild*"
+      patternfly:
+        patterns:
+          - "@patternfly*"
+      react:
+        patterns:
+          - "react*"
+      stylelint:
+        patterns:
+          - "stylelint*"
+      types:
+        patterns:
+          - "@types*"
+          - "types*"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     open-pull-requests-limit: 3

@@ -47,3 +47,9 @@ jobs:
         run: |
           make bots
           bots/cockpit-lib-update
+
+      - name: Run cockpit-lib-update (cockpit-wireguard)
+        working-directory: cockpit-wireguard
+        run: |
+          make bots
+          bots/cockpit-lib-update

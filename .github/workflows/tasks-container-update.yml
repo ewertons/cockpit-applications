@@ -51,3 +51,9 @@ jobs:
         run: |
           make bots
           bots/tasks-container-update
+
+      - name: Run tasks-container-update (cockpit-wireguard)
+        working-directory: cockpit-wireguard
+        run: |
+          make bots
+          bots/tasks-container-update
