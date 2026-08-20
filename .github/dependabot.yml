@@ -28,6 +28,25 @@ updates:
           - "@types*"
           - "types*"
 
+    ignore:
+      # https://github.com/cockpit-project/cockpit/issues/21151
+      - dependency-name: "sass"
+        versions: [">=1.80.0", "2.x"]
+
+      # needs to be done in Cockpit first
+      - dependency-name: "@patternfly/*"
+        update-types: ["version-update:semver-major"]
+
+      # PF5 requires React 18
+      - dependency-name: "*react*"
+        update-types: ["version-update:semver-major"]
+
+      # These apps configure ESLint through .eslintrc.json, which ESLint 9
+      # dropped in favour of flat config; the plugins move in lockstep, so the
+      # whole eslint* family has to stay on the 8.x generation.
+      - dependency-name: "eslint*"
+        update-types: ["version-update:semver-major"]
+
   - package-ecosystem: "npm"
     directory: "/cockpit-backup"
     schedule:
@@ -69,8 +88,10 @@ updates:
       - dependency-name: "*react*"
         update-types: ["version-update:semver-major"]
 
-      # The plugins we use didn't work with anything after 8 at some point
-      - dependency-name: "eslint"
+      # These apps configure ESLint through .eslintrc.json, which ESLint 9
+      # dropped in favour of flat config; the plugins move in lockstep, so the
+      # whole eslint* family has to stay on the 8.x generation.
+      - dependency-name: "eslint*"
         update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "npm"
@@ -114,8 +135,10 @@ updates:
       - dependency-name: "*react*"
         update-types: ["version-update:semver-major"]
 
-      # The plugins we use didn't work with anything after 8 at some point
-      - dependency-name: "eslint"
+      # These apps configure ESLint through .eslintrc.json, which ESLint 9
+      # dropped in favour of flat config; the plugins move in lockstep, so the
+      # whole eslint* family has to stay on the 8.x generation.
+      - dependency-name: "eslint*"
         update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "npm"
@@ -146,6 +169,25 @@ updates:
           - "@types*"
           - "types*"
 
+    ignore:
+      # https://github.com/cockpit-project/cockpit/issues/21151
+      - dependency-name: "sass"
+        versions: [">=1.80.0", "2.x"]
+
+      # needs to be done in Cockpit first
+      - dependency-name: "@patternfly/*"
+        update-types: ["version-update:semver-major"]
+
+      # PF5 requires React 18
+      - dependency-name: "*react*"
+        update-types: ["version-update:semver-major"]
+
+      # These apps configure ESLint through .eslintrc.json, which ESLint 9
+      # dropped in favour of flat config; the plugins move in lockstep, so the
+      # whole eslint* family has to stay on the 8.x generation.
+      - dependency-name: "eslint*"
+        update-types: ["version-update:semver-major"]
+
   - package-ecosystem: "npm"
     directory: "/cockpit-wireguard"
     schedule:
@@ -173,6 +215,25 @@ updates:
         patterns:
           - "@types*"
           - "types*"
+
+    ignore:
+      # https://github.com/cockpit-project/cockpit/issues/21151
+      - dependency-name: "sass"
+        versions: [">=1.80.0", "2.x"]
+
+      # needs to be done in Cockpit first
+      - dependency-name: "@patternfly/*"
+        update-types: ["version-update:semver-major"]
+
+      # PF5 requires React 18
+      - dependency-name: "*react*"
+        update-types: ["version-update:semver-major"]
+
+      # These apps configure ESLint through .eslintrc.json, which ESLint 9
+      # dropped in favour of flat config; the plugins move in lockstep, so the
+      # whole eslint* family has to stay on the 8.x generation.
+      - dependency-name: "eslint*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
