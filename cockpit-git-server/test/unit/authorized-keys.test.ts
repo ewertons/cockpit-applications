@@ -80,10 +80,27 @@ describe("options", () => {
     });
 
     test("buildOptions output parses back to the same restrictions", () => {
-        const restrictions = { restrict: true, fromAddresses: "192.0.2.1,!192.0.2.9", expiryTime: "203001011200", otherOptions: ["no-pty"] };
+        const restrictions = { restrict: true, fromAddresses: "192.0.2.1,!192.0.2.9", expiryTime: "203001011200", otherOptions: [] };
         const options = buildOptions(restrictions);
-        assert.equal(options, `restrict,from="192.0.2.1,!192.0.2.9",expiry-time="203001011200",no-pty`);
+        assert.equal(options, `restrict,from="192.0.2.1,!192.0.2.9",expiry-time="203001011200"`);
         assert.deepEqual(restrictionsFromOptions(options), restrictions);
+    });
+
+    test("editing keeps the order of existing options", () => {
+        // sshd applies options in order: port-forwarding before restrict is overridden by it.
+        const existing = `port-forwarding,restrict,from="192.0.2.1"`;
+        const restrictions = { ...restrictionsFromOptions(existing), expiryTime: "20300101" };
+        assert.equal(buildOptions(restrictions, existing), `port-forwarding,restrict,from="192.0.2.1",expiry-time="20300101"`);
+
+        const updatedFrom = { ...restrictionsFromOptions(existing), fromAddresses: "192.0.2.7" };
+        assert.equal(buildOptions(updatedFrom, existing), `port-forwarding,restrict,from="192.0.2.7"`);
+    });
+
+    test("editing adds restrict first and removes cleared options", () => {
+        const existing = `no-pty,from="192.0.2.1",command="echo a, b"`;
+        const restrictions = { ...restrictionsFromOptions(existing), restrict: true, fromAddresses: "" };
+        assert.equal(buildOptions(restrictions, existing), `restrict,no-pty,command="echo a, b"`);
+        assert.equal(buildOptions({ ...restrictions, restrict: false }, "restrict,no-pty"), "no-pty");
     });
 
     test("no options when nothing is restricted", () => {
@@ -158,6 +175,9 @@ describe("validation", () => {
         assert.equal(validatePublicKey(`ssh-dss ${FIRST_BLOB}`), "unsupported-key-type");
         // Blob of an RSA key labelled as ed25519.
         assert.equal(validatePublicKey(`ssh-ed25519 ${RSA_BLOB_PREFIX}`), "invalid-key-data");
+        // Key type header only, or truncated key material.
+        assert.equal(validatePublicKey("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5"), "invalid-key-data");
+        assert.equal(validatePublicKey(`ssh-ed25519 ${FIRST_BLOB.slice(0, -8)}`), "invalid-key-data");
         assert.equal(validatePublicKey(`ssh-ed25519 ${FIRST_BLOB} bad"comment`), "invalid-comment");
     });
 

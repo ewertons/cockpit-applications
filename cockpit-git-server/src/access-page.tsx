@@ -93,20 +93,21 @@ interface RestrictionFieldsProps {
 
 const RestrictionFields = ({ idPrefix, restrictions, onChange }: RestrictionFieldsProps) => (
     <>
-        <Checkbox
-            id={idPrefix + "-restrict"}
-            label={_("Restrict (recommended)")}
-            description={_("Disables port, agent and X11 forwarding and terminal allocation. Git over SSH keeps working.")}
-            isChecked={restrictions.restrict}
-            onChange={(_event, value) => onChange({ ...restrictions, restrict: value })}
-            style={{ marginTop: "1rem" }}
-        />
+        <div style={{ marginTop: "1rem" }}>
+            <Checkbox
+                id={idPrefix + "-restrict"}
+                label={_("Restrict (recommended)")}
+                description={_("Disables port, agent and X11 forwarding and terminal allocation. Git over SSH keeps working.")}
+                isChecked={restrictions.restrict}
+                onChange={(_event, value) => onChange({ ...restrictions, restrict: value })}
+            />
+        </div>
         <FormGroup label={_("Allowed sources (optional)")} fieldId={idPrefix + "-from"} style={{ marginTop: "1rem" }}>
             <TextInput
                 id={idPrefix + "-from"}
                 value={restrictions.fromAddresses}
                 onChange={(_event, value) => onChange({ ...restrictions, fromAddresses: value })}
-                placeholder="192.0.2.10,198.51.100.0/24"
+                placeholder="10.0.0.5,192.168.1.0/24,*.example.com"
             />
         </FormGroup>
         <FormGroup label={_("Expiry time (optional)")} fieldId={idPrefix + "-expiry"} style={{ marginTop: "1rem" }}>
@@ -213,11 +214,13 @@ export const AccessPage = () => {
         setAdding(true);
         setAddError("");
 
-        updateAuthorizedKeys(content => {
-            if (parseAuthorizedKeys(content).some(key => sameKey(key, parsed)))
-                throw new Error(_("That key is already authorized."));
-            return appendKeyLine(content, newLine);
-        })
+        keyFingerprint(parsed)
+                .catch(() => { throw new Error(validationMessage("invalid-key-data")) })
+                .then(() => updateAuthorizedKeys(content => {
+                    if (parseAuthorizedKeys(content).some(key => sameKey(key, parsed)))
+                        throw new Error(_("That key is already authorized."));
+                    return appendKeyLine(content, newLine);
+                }))
                 .then(() => {
                     if (keyDir)
                         cockpit.spawn(["rm", "-rf", keyDir], { err: "ignore" });
@@ -263,7 +266,7 @@ export const AccessPage = () => {
             return;
         }
 
-        const newLine = serializeKeyLine({ ...editedKey, options: buildOptions(editedRestrictions) });
+        const newLine = serializeKeyLine({ ...editedKey, options: buildOptions(editedRestrictions, editedKey.options) });
         setSaving(true);
         setEditError("");
         updateAuthorizedKeys(content => {

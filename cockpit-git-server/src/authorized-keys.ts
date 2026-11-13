@@ -28,7 +28,7 @@ export interface KeyRestrictions {
     restrict: boolean;
     fromAddresses: string;
     expiryTime: string;
-    /** Options this page does not manage, kept verbatim. */
+    /** Options this page does not manage; for display, buildOptions() keeps them in place. */
     otherOptions: string[];
 }
 
@@ -128,35 +128,80 @@ function unquote(value: string): string {
     return match ? match[1].replace(/\\(.)/g, "$1") : value;
 }
 
+function optionName(option: string): { name: string, hasValue: boolean } {
+    const separator = option.indexOf("=");
+    return {
+        name: (separator < 0 ? option : option.slice(0, separator)).toLowerCase(),
+        hasValue: separator >= 0,
+    };
+}
+
+type ManagedOption = "restrict" | "from" | "expiry-time";
+
+function managedOption(option: string): ManagedOption | null {
+    const { name, hasValue } = optionName(option);
+    if (name === "restrict" && !hasValue)
+        return "restrict";
+    if ((name === "from" || name === "expiry-time") && hasValue)
+        return name;
+    return null;
+}
+
 export function restrictionsFromOptions(options: string): KeyRestrictions {
     const restrictions: KeyRestrictions = { restrict: false, fromAddresses: "", expiryTime: "", otherOptions: [] };
     for (const option of splitOptions(options)) {
-        const separator = option.indexOf("=");
-        const name = (separator < 0 ? option : option.slice(0, separator)).toLowerCase();
-        const value = separator < 0 ? "" : unquote(option.slice(separator + 1));
-        if (name === "restrict" && separator < 0)
+        const value = unquote(option.slice(option.indexOf("=") + 1));
+        switch (managedOption(option)) {
+        case "restrict":
             restrictions.restrict = true;
-        else if (name === "from" && separator >= 0)
+            break;
+        case "from":
             restrictions.fromAddresses = value;
-        else if (name === "expiry-time" && separator >= 0)
+            break;
+        case "expiry-time":
             restrictions.expiryTime = value;
-        else
+            break;
+        default:
             restrictions.otherOptions.push(option);
+        }
     }
     return restrictions;
 }
 
 // --- Serialization -------------------------------------------------------
 
-export function buildOptions(restrictions: KeyRestrictions): string {
+/**
+ * Apply restrictions to an existing options field. Options keep their original
+ * order, because sshd applies them in sequence: "port-forwarding,restrict" and
+ * "restrict,port-forwarding" grant different permissions. Unmanaged options
+ * are kept; a newly added "restrict" goes first so it does not override them.
+ */
+export function buildOptions(restrictions: KeyRestrictions, existingOptions = ""): string {
+    const managedValues: Record<ManagedOption, string | null> = {
+        restrict: restrictions.restrict ? "restrict" : null,
+        from: restrictions.fromAddresses.trim() ? `from="${restrictions.fromAddresses.trim()}"` : null,
+        "expiry-time": restrictions.expiryTime.trim() ? `expiry-time="${restrictions.expiryTime.trim()}"` : null,
+    };
+    const placed = new Set<ManagedOption>();
     const options: string[] = [];
-    if (restrictions.restrict)
-        options.push("restrict");
-    if (restrictions.fromAddresses.trim())
-        options.push(`from="${restrictions.fromAddresses.trim()}"`);
-    if (restrictions.expiryTime.trim())
-        options.push(`expiry-time="${restrictions.expiryTime.trim()}"`);
-    options.push(...restrictions.otherOptions);
+    for (const option of splitOptions(existingOptions)) {
+        const managed = managedOption(option);
+        if (!managed) {
+            options.push(option);
+            continue;
+        }
+        const value = managedValues[managed];
+        if (value !== null && !placed.has(managed))
+            options.push(value);
+        placed.add(managed);
+    }
+    if (managedValues.restrict !== null && !placed.has("restrict"))
+        options.unshift(managedValues.restrict);
+    for (const managed of ["from", "expiry-time"] as const) {
+        const value = managedValues[managed];
+        if (value !== null && !placed.has(managed))
+            options.push(value);
+    }
     return options.join(",");
 }
 
@@ -187,13 +232,23 @@ export function validatePublicKey(text: string): ValidationError | null {
     if (!ALLOWED_KEY_TYPES.includes(parsed.keyType))
         return "unsupported-key-type";
 
-    // The blob starts with a length-prefixed copy of the key type.
+    // The blob is a sequence of length-prefixed fields: the key type, then the
+    // key material. They must fill the blob exactly.
     const decoded = decodeBase64(parsed.keyBlob);
-    if (decoded === null || decoded.length < 4)
+    if (decoded === null)
         return "invalid-key-data";
-    const nameLength = ((decoded.charCodeAt(0) << 24) | (decoded.charCodeAt(1) << 16) |
-                        (decoded.charCodeAt(2) << 8) | decoded.charCodeAt(3)) >>> 0;
-    if (decoded.slice(4, 4 + nameLength) !== parsed.keyType)
+    const fields: string[] = [];
+    let offset = 0;
+    while (offset + 4 <= decoded.length) {
+        const fieldLength = ((decoded.charCodeAt(offset) << 24) | (decoded.charCodeAt(offset + 1) << 16) |
+                             (decoded.charCodeAt(offset + 2) << 8) | decoded.charCodeAt(offset + 3)) >>> 0;
+        offset += 4;
+        if (fieldLength === 0 || offset + fieldLength > decoded.length)
+            return "invalid-key-data";
+        fields.push(decoded.slice(offset, offset + fieldLength));
+        offset += fieldLength;
+    }
+    if (offset !== decoded.length || fields.length < 2 || fields[0] !== parsed.keyType)
         return "invalid-key-data";
 
     return validateComment(parsed.comment);
