@@ -8,7 +8,7 @@ A [Cockpit](https://cockpit-project.org/) extension for managing bare Git reposi
 - **Repository detail** — branches, tags, recent commits, git config
 - **Web-based repo browsing** — commit log, file tree, file viewer, diff viewer with branch/tag selector
 - **Service management** — start/stop/restart `git-daemon.service` and `sshd.service` via systemd
-- **Access control** — manage SSH public keys in `~git/.ssh/authorized_keys`, with Gitolite auto-detection
+- **Access control** — manage SSH public keys in `~git/.ssh/authorized_keys` with per-key `restrict`, `from=` and `expiry-time=` options, Gitolite auto-detection, and a check of the sshd settings applied to the `git` user
 - **Clone URLs** — display SSH and git:// clone URLs for each repo
 
 ## Requirements
@@ -89,6 +89,10 @@ npm run stylelint:fix
 ```
 
 ## Running tests
+
+Run the unit tests (no VM needed):
+
+    npm test
 
 Run integration tests in a Cockpit test VM:
 
