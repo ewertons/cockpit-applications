@@ -68,7 +68,7 @@ export const TunnelDetailPage = ({ tunnelName }: TunnelDetailPageProps) => {
             };
             await saveInterface(updated);
             if (iface.up) {
-                try { await applyLive(iface.name) } catch { /* applied on next restart */ }
+                try { await applyLive(updated) } catch { /* applied on next restart */ }
             }
         } catch (e: unknown) {
             setError(e instanceof Error ? e.message : String(e));
