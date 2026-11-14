@@ -87,6 +87,15 @@ function runIptables(tables: Tables, argumentsText: string): boolean {
             return false;
         chains[chain].push(rule);
         return true;
+    case "-I": {
+        if (!chains[chain])
+            return false;
+        const [position, ...insertedRule] = rest;
+        chains[chain].splice(Number(position) - 1, 0, insertedRule.join(" "));
+        return true;
+    }
+    case "-C":
+        return chains[chain]?.includes(rule) ?? false;
     case "-D": {
         const index = chains[chain]?.indexOf(rule) ?? -1;
         if (index === -1)
@@ -120,6 +129,67 @@ function runHook(tables: Tables, hook: string, interfaceName: string): void {
         if (!succeeded)
             throw new Error(`hook failed: ${sequence}`);
     }
+}
+
+// Runs liveFirewallScript output for the shell subset it uses.
+function runLiveScript(tables: Tables, script: string, interfaceName: string): void {
+    const lines = script.trimEnd().split("\n");
+    for (let index = 0; index < lines.length; index++) {
+        const line = lines[index].replace(/"\$egress"/g, "eth0");
+        if (line === "set -e" || line.startsWith("sysctl ") || line.startsWith("egress="))
+            continue;
+        if (line === "iptables-restore --noflush <<'EOF'") {
+            const end = lines.indexOf("EOF", index);
+            const body = lines.slice(index + 1, end);
+            assert.equal(body[0], "*filter");
+            assert.equal(body[body.length - 1], "COMMIT");
+            for (const restoreLine of body.slice(1, -1)) {
+                if (restoreLine.startsWith(":"))
+                    tables.filter[restoreLine.slice(1).split(" ")[0]] = [];
+                else if (!runIptables(tables, restoreLine))
+                    throw new Error(`restore failed: ${restoreLine}`);
+            }
+            index = end;
+            continue;
+        }
+        const loop = line.match(/^while iptables (.*) 2>\/dev\/null; do :; done$/);
+        if (loop) {
+            while (runIptables(tables, loop[1]));
+            continue;
+        }
+        runHook(tables, line, interfaceName);
+    }
+}
+
+function ipv4ToNumber(address: string): number {
+    return address.split(".").reduce((total, octet) => total * 256 + Number(octet), 0);
+}
+
+function cidrContains(cidr: string, address: string): boolean {
+    const [network, prefix] = cidr.split("/");
+    const size = 2 ** (32 - Number(prefix));
+    return Math.floor(ipv4ToNumber(address) / size) === Math.floor(ipv4ToNumber(network) / size);
+}
+
+// Verdict of the first matching rule for a new (not yet established) packet.
+function chainVerdict(rules: string[], packet: { source: string; destination: string; protocol: string; port: number }): string {
+    for (const rule of rules) {
+        const words = rule.split(" ");
+        const option = (name: string) => { const at = words.indexOf(name); return at === -1 ? undefined : words[at + 1] };
+        if (option("--ctstate"))
+            continue;
+        const source = option("-s");
+        const destination = option("-d");
+        const protocol = option("-p");
+        const port = option("--dport");
+        if ((source && !cidrContains(source, packet.source)) ||
+            (destination && !cidrContains(destination, packet.destination)) ||
+            (protocol && protocol !== packet.protocol) ||
+            (port && Number(port) !== packet.port))
+            continue;
+        return option("-j")!;
+    }
+    return "none";
 }
 
 describe("config round-trip", () => {
@@ -191,13 +261,17 @@ describe("config round-trip", () => {
         assert.ok(withoutAccess.includes("# ClientLanAccess = none"));
     });
 
-    test("hand-written hooks next to managed rules are preserved", () => {
-        const managed = serializeConfig(convertLegacyFirewall(parseConfig("wg0", hubConfig(legacyNatRules()))));
-        const text = managed.replace("ListenPort = 51820\n", "ListenPort = 51820\nPostUp = echo extra\n");
-        const iface = parseConfig("wg0", text);
-        assert.equal(iface.firewallManagement, "managed");
-        assert.deepEqual(iface.extraInterfaceLines, ["PostUp = echo extra"]);
-        assert.ok(serializeConfig(iface).includes("PostUp = echo extra\n"));
+    test("edited or added hooks make the tunnel unmanaged and are kept verbatim", () => {
+        const managed = serializeConfig(withLaptopAccess(
+            convertLegacyFirewall(parseConfig("wg0", hubConfig(legacyNatRules()))), ["192.168.1.198:22/tcp"]));
+        const edited = managed.replace("--dport 22 -j ACCEPT", "--dport 22 -j DROP");
+        const added = managed.replace("ListenPort = 51820\n", "ListenPort = 51820\nPostUp = echo extra\n");
+        for (const text of [edited, added]) {
+            assert.notEqual(text, managed);
+            const iface = parseConfig("wg0", text);
+            assert.equal(iface.firewallManagement, "unmanaged");
+            assert.equal(serializeConfig(iface), text);
+        }
     });
 });
 
@@ -230,6 +304,7 @@ describe("hub firewall rules", () => {
                 "-s 10.10.20.3/32 -d 192.168.1.10/32 -p tcp --dport 53 -j ACCEPT",
                 "-s 10.10.20.3/32 -d 192.168.1.10/32 -p udp --dport 53 -j ACCEPT",
                 "-s 10.10.20.3/32 -d 192.168.5.0/24 -j ACCEPT",
+                "-s 10.10.20.3/32 -j DROP",
             ],
             ["-j DROP"],
         ]);
@@ -247,7 +322,7 @@ describe("hub firewall rules", () => {
         for (const line of lines.filter(line => line.startsWith("PostUp = ")))
             runHook(tables, line, "wg0");
 
-        assert.deepEqual(tables.filter.FORWARD, ["-i eth0 -j ACCEPT", "-i wg0 -j wg-access-wg0", "-o wg0 -j ACCEPT"]);
+        assert.deepEqual(tables.filter.FORWARD, ["-i wg0 -j wg-access-wg0", "-i eth0 -j ACCEPT", "-o wg0 -j ACCEPT"]);
         assert.deepEqual(tables.nat.POSTROUTING, ["-o eth0 -j MASQUERADE"]);
         assert.deepEqual(tables.filter["wg-access-wg0"], accessChainRuleSpecs(managed).flat());
 
@@ -263,16 +338,54 @@ describe("hub firewall rules", () => {
         assert.deepEqual(tables.filter["wg-access-wg0"], accessChainRuleSpecs(managed).flat());
     });
 
-    test("live update swaps the chain atomically, or replaces the legacy rules", () => {
-        const refresh = liveFirewallScript(managed, "managed");
-        assert.ok(refresh.includes("if iptables -C FORWARD -i wg0 -j wg-access-wg0 2>/dev/null; then\niptables-restore --noflush <<'EOF'\n*filter\n:wg-access-wg0 - [0:0]\n"));
-        assert.ok(refresh.includes("-A wg-access-wg0 -s 10.10.20.3/32 -d 192.168.1.198/32 -p tcp --dport 22 -j ACCEPT\n"));
-        assert.ok(!refresh.includes("-D FORWARD -i wg0 -j ACCEPT"));
+    test("each tunnel's access chain runs before any tunnel's egress ACCEPT", () => {
+        const tables: Tables = { filter: { FORWARD: [] }, nat: { POSTROUTING: [] } };
+        for (const interfaceName of ["wg0", "wg1"])
+            for (const line of managedFirewallLines(managed).filter(line => line.startsWith("PostUp = ")))
+                runHook(tables, line, interfaceName);
+        const forward = tables.filter.FORWARD;
+        const lastJump = Math.max(forward.indexOf("-i wg0 -j wg-access-wg0"), forward.indexOf("-i wg1 -j wg-access-wg1"));
+        const firstEgress = Math.min(forward.indexOf("-o wg0 -j ACCEPT"), forward.indexOf("-o wg1 -j ACCEPT"));
+        assert.ok(lastJump >= 0 && lastJump < firstEgress, forward.join(" | "));
+    });
 
-        const upgrade = liveFirewallScript(managed, "legacy");
-        assert.ok(upgrade.includes("{ iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o wg0 -j ACCEPT;"));
-        assert.ok(upgrade.indexOf("-D FORWARD -i wg0 -j ACCEPT") < upgrade.indexOf("iptables -A FORWARD -i wg0 -j wg-access-wg0"));
-        assert.ok(!upgrade.includes("%i"));
+    test("overlapping peers are governed by their most specific source", () => {
+        const text = hubConfig([], ["# ClientAllowedIPs = 10.10.20.0/24", "# ClientLanAccess = none"])
+                .replace("AllowedIPs = 10.10.20.2/32", "AllowedIPs = 10.10.20.0/28");
+        const rules = accessChainRuleSpecs(parseConfig("wg0", text)).flat();
+        const lanPacket = { destination: "192.168.1.50", protocol: "tcp", port: 80 };
+        assert.equal(chainVerdict(rules, { ...lanPacket, source: "10.10.20.3" }), "DROP");
+        assert.equal(chainVerdict(rules, { ...lanPacket, source: "10.10.20.5" }), "ACCEPT");
+        assert.equal(chainVerdict(rules, { ...lanPacket, source: "10.10.20.3", destination: "10.10.20.9" }), "ACCEPT");
+    });
+
+    test("live update reconciles any installed state and is idempotent", () => {
+        const script = liveFirewallScript(managed);
+        assert.ok(!script.includes("%i"));
+        const expectedChain = accessChainRuleSpecs(managed).flat();
+        const legacyRunning = (): Tables => {
+            const tables: Tables = { filter: { FORWARD: ["-i eth0 -j ACCEPT"] }, nat: { POSTROUTING: [] } };
+            for (const line of legacyNatRules().filter(line => line.startsWith("PostUp = ")))
+                runHook(tables, line, "wg0");
+            return tables;
+        };
+        const managedRunning = (): Tables => {
+            const tables: Tables = { filter: { FORWARD: ["-i eth0 -j ACCEPT"], "wg-access-wg0": ["-j ACCEPT"] }, nat: { POSTROUTING: [] } };
+            for (const line of managedFirewallLines(managed).filter(line => line.startsWith("PostUp = ")))
+                runHook(tables, line, "wg0");
+            tables.filter["wg-access-wg0"] = ["-j ACCEPT"];
+            return tables;
+        };
+        for (const tables of [legacyRunning(), managedRunning()]) {
+            runLiveScript(tables, script, "wg0");
+            runLiveScript(tables, script, "wg0");
+            assert.deepEqual(tables.filter.FORWARD, ["-i wg0 -j wg-access-wg0", "-i eth0 -j ACCEPT", "-o wg0 -j ACCEPT"]);
+            assert.deepEqual(tables.filter["wg-access-wg0"], expectedChain);
+            assert.deepEqual(tables.nat.POSTROUTING, ["-o eth0 -j MASQUERADE"]);
+            for (const line of managedFirewallLines(managed).filter(line => line.startsWith("PostDown = ")))
+                runHook(tables, line, "wg0");
+            assert.deepEqual(tables, { filter: { FORWARD: ["-i eth0 -j ACCEPT"] }, nat: { POSTROUTING: [] } });
+        }
     });
 });
 

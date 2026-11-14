@@ -362,21 +362,27 @@ export async function setEnabledAtBoot(name: string, enabled: boolean): Promise<
 
 /**
  * Apply the on-disk config to a running interface without dropping active
- * peers, and refresh the per-client firewall rules when this app manages them.
- * @param previousFirewallManagement Rules currently installed (defaults to
- *        iface.firewallManagement); "legacy" swaps the old rules for the new.
+ * peers, and bring the per-client firewall rules in line with it when this app
+ * manages them. The firewall is reconciled even if the peer sync fails.
  */
-export async function applyLive(iface: WgInterface, previousFirewallManagement?: FirewallManagement): Promise<void> {
-    await cockpit.spawn(
-        ["bash", "-c", `wg syncconf ${iface.name} <(wg-quick strip ${iface.name})`],
-        { superuser: "try", err: "message" }
-    );
+export async function applyLive(iface: WgInterface): Promise<void> {
+    let syncError: unknown = null;
+    try {
+        await cockpit.spawn(
+            ["bash", "-c", `wg syncconf ${iface.name} <(wg-quick strip ${iface.name})`],
+            { superuser: "try", err: "message" }
+        );
+    } catch (error) {
+        syncError = error;
+    }
     if (iface.firewallManagement === "managed") {
         await cockpit.spawn(
-            ["bash", "-c", liveFirewallScript(iface, previousFirewallManagement ?? iface.firewallManagement)],
+            ["bash", "-c", liveFirewallScript(iface)],
             { superuser: "try", err: "message" }
         );
     }
+    if (syncError)
+        throw syncError;
 }
 
 export async function deleteInterface(name: string): Promise<void> {
@@ -426,8 +432,9 @@ export function legacyNatRules(): string[] {
 
 const MANAGED_FORWARDING_LINE = `PostUp = sysctl -q -w net.ipv4.ip_forward=1`;
 const MANAGED_CREATE_CHAIN_LINE = `PostUp = iptables -N ${ACCESS_CHAIN} 2>/dev/null || iptables -F ${ACCESS_CHAIN}`;
-const MANAGED_CHAIN_RULE_PREFIX = `PostUp = iptables -A ${ACCESS_CHAIN} `;
-const MANAGED_ATTACH_LINE = `PostUp = iptables -A FORWARD -i %i -j ${ACCESS_CHAIN}; iptables -A FORWARD -o %i -j ACCEPT; iptables -t nat -A POSTROUTING -o ${EGRESS_DEVICE} -j MASQUERADE`;
+// The jump goes first in FORWARD so no other tunnel's "-o ACCEPT" (or any
+// earlier ACCEPT) is reached before this tunnel's access chain.
+const MANAGED_ATTACH_LINE = `PostUp = iptables -I FORWARD 1 -i %i -j ${ACCESS_CHAIN}; iptables -A FORWARD -o %i -j ACCEPT; iptables -t nat -A POSTROUTING -o ${EGRESS_DEVICE} -j MASQUERADE`;
 // Every step tolerates failure so a partial state is still fully removed.
 const MANAGED_POST_DOWN_LINE = "PostDown = " + [
     `iptables -D FORWARD -i %i -j ${ACCESS_CHAIN}`,
@@ -441,19 +448,19 @@ function isFirewallHookLine(line: string): boolean {
     return /^Post(Up|Down)\s*=/i.test(line);
 }
 
-// Classify the tunnel's PostUp/PostDown lines. For managed tunnels the
-// generated lines are dropped from extraInterfaceLines; serializeConfig
-// regenerates them from the peers.
+// Classify the tunnel's PostUp/PostDown lines. A tunnel is managed only if its
+// hooks are exactly what this app generates for its peers, so hand edits are
+// never overwritten. Managed hooks are dropped from extraInterfaceLines;
+// serializeConfig regenerates them from the peers.
 function detectFirewallManagement(iface: WgInterface): void {
     const extras = iface.extraInterfaceLines || [];
     const hooks = extras.filter(isFirewallHookLine);
-    const managedBaseLines = [MANAGED_FORWARDING_LINE, MANAGED_CREATE_CHAIN_LINE, MANAGED_ATTACH_LINE, MANAGED_POST_DOWN_LINE];
     const legacyLines = legacyNatRules();
+    const managedLines = managedFirewallLines(iface);
 
-    if (managedBaseLines.every(line => hooks.includes(line))) {
+    if (hooks.length === managedLines.length && hooks.every((line, index) => line === managedLines[index])) {
         iface.firewallManagement = "managed";
-        iface.extraInterfaceLines = extras.filter(line => !managedBaseLines.includes(line) &&
-                                                          !line.startsWith(MANAGED_CHAIN_RULE_PREFIX));
+        iface.extraInterfaceLines = extras.filter(line => !isFirewallHookLine(line));
     } else if (hooks.length === legacyLines.length && legacyLines.every(line => hooks.includes(line))) {
         iface.firewallManagement = "legacy";
     } else {
@@ -488,37 +495,44 @@ export function hasUnrestrictedForwarding(peer: WgPeer): boolean {
 
 /**
  * iptables rule specs (without "-A <chain>") of the per-tunnel access chain,
- * grouped per hook line: replies first, then one group per peer, then DROP.
+ * grouped per hook line: replies first, then one group per peer source, most
+ * specific source first (as WireGuard picks the peer), then DROP. A restricted
+ * group ends with its own DROP so a broader peer's rules never apply to it.
  */
 export function accessChainRuleSpecs(iface: WgInterface): string[][] {
     const vpnSubnet = serverSubnetCidr(iface);
-    const groups: string[][] = [["-m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"]];
+    const sourceGroups: { prefix: number; specs: string[] }[] = [];
     for (const peer of iface.peers) {
         const sources = peer.allowedIps.map(normalizeIpv4Cidr).filter((cidr): cidr is string => cidr !== null);
-        const peerSpecs: string[] = [];
         for (const source of sources) {
+            const prefix = Number(source.split("/")[1]);
             if (hasUnrestrictedForwarding(peer)) {
-                peerSpecs.push(`-s ${source} -j ACCEPT`);
+                sourceGroups.push({ prefix, specs: [`-s ${source} -j ACCEPT`] });
                 continue;
             }
-            peerSpecs.push(`-s ${source} -d ${vpnSubnet} -j ACCEPT`);
+            const specs = [`-s ${source} -d ${vpnSubnet} -j ACCEPT`];
             for (const text of peer.lanAccess || []) {
                 const entry = parseLanAccessEntry(text).entry;
                 if (!entry)
                     continue;
                 if (entry.port === undefined) {
-                    peerSpecs.push(`-s ${source} -d ${entry.destination} -j ACCEPT`);
+                    specs.push(`-s ${source} -d ${entry.destination} -j ACCEPT`);
                     continue;
                 }
                 for (const protocol of entry.protocol ? [entry.protocol] : ["tcp", "udp"])
-                    peerSpecs.push(`-s ${source} -d ${entry.destination} -p ${protocol} --dport ${entry.port} -j ACCEPT`);
+                    specs.push(`-s ${source} -d ${entry.destination} -p ${protocol} --dport ${entry.port} -j ACCEPT`);
             }
+            specs.push(`-s ${source} -j DROP`);
+            sourceGroups.push({ prefix, specs });
         }
-        if (peerSpecs.length)
-            groups.push(peerSpecs);
     }
-    groups.push(["-j DROP"]);
-    return groups;
+    // Array.prototype.sort is stable, so equal prefixes keep the peer order.
+    sourceGroups.sort((first, second) => second.prefix - first.prefix);
+    return [
+        ["-m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"],
+        ...sourceGroups.map(group => group.specs),
+        ["-j DROP"],
+    ];
 }
 
 /** PostUp/PostDown lines for a tunnel whose firewall rules this app manages. */
@@ -534,25 +548,18 @@ export function managedFirewallLines(iface: WgInterface): string[] {
     ];
 }
 
-function hookCommands(lines: string[], hook: "PostUp" | "PostDown", interfaceName: string): string[] {
-    return lines.filter(line => line.startsWith(`${hook} = `))
-            .map(line => line.slice(hook.length + 3).replace(/%i/g, interfaceName));
-}
-
 /**
- * Bash script that brings a running tunnel's firewall in line with its managed
- * config: atomically replaces the access chain when it is attached, otherwise
- * installs every rule (after removing the legacy ones, if those are running).
+ * Idempotent bash script that brings a running tunnel's firewall in line with
+ * its managed config, whatever is installed now: atomically replaces the
+ * access chain, adds missing attach/masquerade rules and removes the legacy
+ * allow-all rule once the access chain is attached.
  */
-export function liveFirewallScript(iface: WgInterface, previousFirewallManagement: FirewallManagement | undefined): string {
-    const chain = ACCESS_CHAIN.replace(/%i/g, iface.name);
-    const script = ["set -e"];
-    if (previousFirewallManagement === "legacy") {
-        script.push(...hookCommands(legacyNatRules(), "PostDown", iface.name)
-                .map(command => `{ ${command}; } 2>/dev/null || true`));
-    }
-    script.push(
-        `if iptables -C FORWARD -i ${iface.name} -j ${chain} 2>/dev/null; then`,
+export function liveFirewallScript(iface: WgInterface): string {
+    const name = iface.name;
+    const chain = ACCESS_CHAIN.replace(/%i/g, name);
+    return [
+        "set -e",
+        "sysctl -q -w net.ipv4.ip_forward=1",
         "iptables-restore --noflush <<'EOF'",
         "*filter",
         `:${chain} - [0:0]`,
@@ -560,11 +567,12 @@ export function liveFirewallScript(iface: WgInterface, previousFirewallManagemen
                 .map(spec => `-A ${chain} ${spec}`),
         "COMMIT",
         "EOF",
-        "else",
-        ...hookCommands(managedFirewallLines(iface), "PostUp", iface.name),
-        "fi",
-    );
-    return script.join("\n") + "\n";
+        `iptables -C FORWARD -i ${name} -j ${chain} 2>/dev/null || iptables -I FORWARD 1 -i ${name} -j ${chain}`,
+        `iptables -C FORWARD -o ${name} -j ACCEPT 2>/dev/null || iptables -A FORWARD -o ${name} -j ACCEPT`,
+        `egress=${EGRESS_DEVICE}`,
+        `iptables -t nat -C POSTROUTING -o "$egress" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o "$egress" -j MASQUERADE`,
+        `while iptables -D FORWARD -i ${name} -j ACCEPT 2>/dev/null; do :; done`,
+    ].join("\n") + "\n";
 }
 
 // --- LAN access entries ----------------------------------------------------

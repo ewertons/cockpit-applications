@@ -48,7 +48,6 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
     const [warning, setWarning] = useState<string | null>(null);
     const [saved, setSaved] = useState(false);
     // Firewall rules installed on the running tunnel, updated after each save
-    const [installedFirewallManagement, setInstalledFirewallManagement] = useState(iface.firewallManagement);
 
     const browserHost = browserEndpointHost();
     const defaultEndpoint = resolveClientEndpoint(iface.publicEndpoint, browserHost, iface.listenPort);
@@ -131,13 +130,12 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
             await saveInterface(updatedIface);
             if (iface.up) {
                 try {
-                    await applyLive(updatedIface, installedFirewallManagement);
+                    await applyLive(updatedIface);
                 } catch (e: unknown) {
                     setWarning(cockpit.format(_("Saved, but the running tunnel could not be updated ($0). Restart the tunnel to apply the changes."),
                                               e instanceof Error ? e.message : String(e)));
                 }
             }
-            setInstalledFirewallManagement(updatedIface.firewallManagement);
             setOriginalPubKey(updatedPeer.publicKey);
             setSaved(true);
             onSaved();

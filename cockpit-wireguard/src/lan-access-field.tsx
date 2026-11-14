@@ -36,7 +36,7 @@ export function LanAccessField({ id, value, onChange, errors, firewallManagement
             </HelperText>
             {firewallManagement === "unmanaged" && (
                 <Alert variant="warning" isInline isPlain title={_("Not enforced on this server")}>
-                    {_("This tunnel's firewall rules (PostUp/PostDown) were not created by this app and are left unchanged. These entries only change the client's configuration; restrict forwarding on this server separately.")}
+                    {_("This tunnel's firewall rules (PostUp/PostDown) were not created by this app, or were edited by hand, and are left unchanged. These entries only change the client's configuration; restrict forwarding on this server separately.")}
                 </Alert>
             )}
             {firewallManagement === "legacy" && (
