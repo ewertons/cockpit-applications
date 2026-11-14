@@ -10,6 +10,7 @@ import { FormGroup } from "@patternfly/react-core/dist/esm/components/Form/index
 import { EmptyState, EmptyStateBody, EmptyStateFooter, EmptyStateActions } from "@patternfly/react-core/dist/esm/components/EmptyState/index.js";
 import { Label } from "@patternfly/react-core/dist/esm/components/Label/index.js";
 import { Checkbox } from "@patternfly/react-core/dist/esm/components/Checkbox/index.js";
+import { ClipboardCopy } from "@patternfly/react-core/dist/esm/components/ClipboardCopy/index.js";
 
 import cockpit from 'cockpit';
 
@@ -143,6 +144,14 @@ export const AccessPage = () => {
     const [generating, setGenerating] = useState(false);
     const [generatedPrivateKey, setGeneratedPrivateKey] = useState("");
     const [keyDir, setKeyDir] = useState("");
+    // The browser may reach Cockpit as "localhost" through an SSH tunnel; clients need the real name.
+    const [hostname, setHostname] = useState("localhost");
+
+    useEffect(() => {
+        const file = cockpit.file('/etc/hostname');
+        file.watch(content => setHostname(content?.trim() || "localhost"));
+        return file.close;
+    }, []);
 
     // Edit restrictions modal
     const [editedKey, setEditedKey] = useState<AuthorizedKeyLine | null>(null);
@@ -365,7 +374,7 @@ export const AccessPage = () => {
         `chmod 600 ~/.ssh/${getKeyFilename()}`,
         "",
         "# Add to ~/.ssh/config:",
-        `Host ${window.location.hostname}`,
+        `Host ${hostname}`,
         `    IdentityFile ~/.ssh/${getKeyFilename()}`,
         "    User git",
     ].join("\n");
@@ -491,6 +500,19 @@ export const AccessPage = () => {
                                 >
                                     {_("Download Private Key")}
                                 </Button>
+                                <div style={{ marginTop: "0.5rem" }}>
+                                    {_("If the download fails (Chromium browsers refuse downloads over an untrusted certificate), copy the key into the file instead:")}
+                                </div>
+                                <ClipboardCopy
+                                    isReadOnly
+                                    isCode
+                                    variant="expansion"
+                                    hoverTip={_("Copy private key")}
+                                    clickTip={_("Copied")}
+                                    style={{ marginTop: "0.25rem" }}
+                                >
+                                    {generatedPrivateKey}
+                                </ClipboardCopy>
                                 <div style={{ marginTop: "0.75rem", fontSize: "0.85rem" }}>
                                     <strong>{_("Setup instructions:")}</strong>
                                     <pre style={{ marginTop: "0.25rem", whiteSpace: "pre-wrap", background: "var(--pf-t--global--background--color--secondary--default)", padding: "0.5rem", borderRadius: "4px" }}>
