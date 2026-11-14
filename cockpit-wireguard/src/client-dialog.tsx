@@ -11,9 +11,12 @@ import { TextInput } from "@patternfly/react-core/dist/esm/components/TextInput/
 import cockpit from 'cockpit';
 
 import { ClientConfigView, sanitizeFileName } from './client-config-view.jsx';
+import { LanAccessField } from './lan-access-field.jsx';
 import {
     WgInterface, WgPeer, buildClientConfig, genKeypair, genPresharedKey,
-    saveInterface, applyLive, serverSubnetCidr, resolveClientEndpoint,
+    saveInterface, applyLive, resolveClientEndpoint, browserEndpointHost,
+    endpointHost, isLoopbackHost, parseLanAccessList, clientAllowedIpsFor,
+    convertLegacyFirewall, isFullTunnelPeer,
 } from './wireguard.js';
 
 const _ = cockpit.gettext;
@@ -30,8 +33,10 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
 
     const [name, setName] = useState(peer.name || "");
     const [clientIp, setClientIp] = useState(peer.allowedIps[0]?.split("/")[0] || "");
-    const [fullTunnel, setFullTunnel] = useState(
-        peer.clientAllowedIps ? peer.clientAllowedIps.includes("0.0.0.0/0") : true);
+    // Clients added outside the dashboard have no recorded mode: default to
+    // split tunnel so saving never silently records full tunnel.
+    const [fullTunnel, setFullTunnel] = useState(isFullTunnelPeer(peer));
+    const [lanAccessText, setLanAccessText] = useState((peer.lanAccess || []).join("\n"));
     const [usePsk, setUsePsk] = useState(!!peer.presharedKey);
     const [psk, setPsk] = useState<string | undefined>(peer.presharedKey);
     const [keys, setKeys] = useState<{ privateKey: string; publicKey: string } | null>(
@@ -40,29 +45,46 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
 
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [warning, setWarning] = useState<string | null>(null);
     const [saved, setSaved] = useState(false);
+    // Firewall rules installed on the running tunnel, updated after each save
+    const [installedFirewallManagement, setInstalledFirewallManagement] = useState(iface.firewallManagement);
 
-    const defaultEndpoint = resolveClientEndpoint(iface.publicEndpoint, window.location.hostname, iface.listenPort);
+    const browserHost = browserEndpointHost();
+    const defaultEndpoint = resolveClientEndpoint(iface.publicEndpoint, browserHost, iface.listenPort);
+    const overrideText = endpointOverride.trim();
+    const overrideIsLoopback = !!overrideText && isLoopbackHost(endpointHost(overrideText));
+    const endpoint = overrideIsLoopback
+        ? null
+        : resolveClientEndpoint(overrideText || iface.publicEndpoint, browserHost, iface.listenPort);
+    const endpointError = overrideIsLoopback
+        ? _("Clients cannot reach a loopback address. Enter the public host or IP of this server.")
+        : !endpoint
+            ? _("No public endpoint is set for this tunnel. Enter the public host or IP clients use to reach this server (add :port if your router forwards another port), or set it in the tunnel settings.")
+            : null;
 
     const ipValid = /^\d{1,3}(\.\d{1,3}){3}$/.test(clientIp.trim()) &&
         clientIp.trim().split(".")
                 .every(o => parseInt(o, 10) <= 255);
     const nameValid = name.trim().length > 0;
+    const lanAccess = useMemo(() => parseLanAccessList(lanAccessText), [lanAccessText]);
+    const lanAccessErrors = fullTunnel ? [] : lanAccess.errors;
+    const clientAllowedIps = clientAllowedIpsFor(iface, fullTunnel, lanAccess.entries);
 
     const config = useMemo(() => {
-        if (!keys || !iface.publicKey || !ipValid)
+        if (!keys || !iface.publicKey || !ipValid || !endpoint)
             return null;
         return buildClientConfig({
             clientPrivateKey: keys.privateKey,
             clientAddress: `${clientIp.trim()}/32`,
             serverPublicKey: iface.publicKey,
             presharedKey: usePsk ? psk : undefined,
-            endpoint: resolveClientEndpoint(endpointOverride.trim() || iface.publicEndpoint, window.location.hostname, iface.listenPort),
+            endpoint,
             dns: iface.clientDns,
-            allowedIps: fullTunnel ? "0.0.0.0/0, ::/0" : serverSubnetCidr(iface),
+            allowedIps: clientAllowedIps,
             persistentKeepalive: 25,
         });
-    }, [keys, iface, clientIp, ipValid, usePsk, psk, fullTunnel, endpointOverride]);
+    }, [keys, iface, clientIp, ipValid, usePsk, psk, endpoint, clientAllowedIps]);
 
     const regenerateKeys = async () => {
         setBusy(true);
@@ -79,6 +101,7 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
     const save = async () => {
         setBusy(true);
         setError(null);
+        setWarning(null);
         try {
             let finalPsk = psk;
             if (usePsk && !finalPsk)
@@ -94,19 +117,27 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
                 privateKey: keys?.privateKey,
                 presharedKey: finalPsk,
                 allowedIps: [`${clientIp.trim()}/32`],
-                clientAllowedIps: fullTunnel ? "0.0.0.0/0, ::/0" : serverSubnetCidr(iface),
-                clientEndpoint: endpointOverride.trim() || undefined,
+                clientAllowedIps,
+                lanAccess: fullTunnel ? peer.lanAccess : lanAccess.entries,
+                clientEndpoint: overrideText || undefined,
             };
 
+            const convertedIface = convertLegacyFirewall(iface);
             const updatedIface: WgInterface = {
-                ...iface,
-                peers: iface.peers.map(p => (p.publicKey === originalPubKey ? updatedPeer : p)),
+                ...convertedIface,
+                peers: convertedIface.peers.map(p => (p.publicKey === originalPubKey ? updatedPeer : p)),
             };
 
             await saveInterface(updatedIface);
             if (iface.up) {
-                try { await applyLive(iface.name) } catch { /* applied on next restart */ }
+                try {
+                    await applyLive(updatedIface, installedFirewallManagement);
+                } catch (e: unknown) {
+                    setWarning(cockpit.format(_("Saved, but the running tunnel could not be updated ($0). Restart the tunnel to apply the changes."),
+                                              e instanceof Error ? e.message : String(e)));
+                }
             }
+            setInstalledFirewallManagement(updatedIface.firewallManagement);
             setOriginalPubKey(updatedPeer.publicKey);
             setSaved(true);
             onSaved();
@@ -121,6 +152,7 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
             <ModalHeader title={cockpit.format(_("Client: $0"), peer.name || _("(unnamed)"))} />
             <ModalBody>
                 {error && <Alert variant="danger" title={_("Error")} isInline style={{ marginBottom: "1rem" }}>{error}</Alert>}
+                {warning && <Alert variant="warning" title={warning} isInline style={{ marginBottom: "1rem" }} />}
                 {saved && (
                     <Alert
                         variant="success" title={_("Changes saved.")} isInline
@@ -150,11 +182,15 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
                         <TextInput
                             id="edit-client-endpoint" value={endpointOverride}
                             onChange={(_ev, v) => { setEndpointOverride(v); setSaved(false) }}
-                            placeholder={defaultEndpoint}
+                            placeholder={defaultEndpoint || "vpn.example.com:51820"}
+                            validated={endpointError ? "error" : "default"}
                         />
                         <HelperText>
-                            <HelperTextItem>
-                                {cockpit.format(_("Where this client connects. Leave blank to use the tunnel default ($0)."), defaultEndpoint)}
+                            <HelperTextItem variant={endpointError ? "error" : "default"}>
+                                {endpointError ||
+                                    (defaultEndpoint
+                                        ? cockpit.format(_("Where this client connects. Leave blank to use the tunnel default ($0)."), defaultEndpoint)
+                                        : _("Where this client connects."))}
                             </HelperTextItem>
                         </HelperText>
                     </FormGroup>
@@ -165,7 +201,29 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
                             label={_("Route all of the client's traffic through the VPN (full tunnel)")}
                             isChecked={fullTunnel} onChange={(_ev, c) => { setFullTunnel(c); setSaved(false) }}
                         />
+                        {!peer.clientAllowedIps && (
+                            <HelperText>
+                                <HelperTextItem variant="warning">
+                                    {_("This client's traffic mode was not recorded (it was added outside the dashboard). Split tunnel is selected; check that it matches the client before saving.")}
+                                </HelperTextItem>
+                            </HelperText>
+                        )}
                     </FormGroup>
+
+                    {!fullTunnel && (
+                        <>
+                            {iface.firewallManagement !== "unmanaged" && peer.lanAccess === undefined && (
+                                <Alert variant="info" isInline isPlain title={_("Saving restricts this client on this server")}>
+                                    {_("This server currently forwards all of this client's traffic. After saving, it only forwards traffic to the VPN subnet and the LAN access entries below.")}
+                                </Alert>
+                            )}
+                            <LanAccessField
+                                id="edit-client-lan-access" value={lanAccessText}
+                                onChange={text => { setLanAccessText(text); setSaved(false) }}
+                                errors={lanAccessErrors} firewallManagement={iface.firewallManagement}
+                            />
+                        </>
+                    )}
 
                     <FormGroup fieldId="edit-client-psk" label={_("Security")}>
                         <Switch
@@ -178,6 +236,13 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
 
                 <Divider style={{ margin: "1.25rem 0" }} />
 
+                {keys && !config && (
+                    <HelperText>
+                        <HelperTextItem variant="warning">
+                            {_("Fix the fields above to show this client's configuration.")}
+                        </HelperTextItem>
+                    </HelperText>
+                )}
                 {config
                     ? (
                         <>
@@ -197,7 +262,7 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
                             </div>
                         </>
                     )
-                    : (
+                    : !keys && (
                         <Alert variant="info" isInline title={_("No stored configuration for this client")}>
                             <p>
                                 {_("This client was added outside the dashboard, so its private key is not stored and its original configuration cannot be shown.")}
@@ -214,7 +279,7 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
                     )}
             </ModalBody>
             <ModalFooter>
-                <Button variant="primary" onClick={save} isLoading={busy} isDisabled={busy || !nameValid || !ipValid}>
+                <Button variant="primary" onClick={save} isLoading={busy} isDisabled={busy || !nameValid || !ipValid || !!endpointError || lanAccessErrors.length > 0}>
                     {_("Save")}
                 </Button>
                 <Button variant="link" onClick={onClose}>{_("Close")}</Button>

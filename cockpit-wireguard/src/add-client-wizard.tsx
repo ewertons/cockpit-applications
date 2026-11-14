@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { Alert } from "@patternfly/react-core/dist/esm/components/Alert/index.js";
 import { FormGroup } from "@patternfly/react-core/dist/esm/components/Form/index.js";
 import { HelperText, HelperTextItem } from "@patternfly/react-core/dist/esm/components/HelperText/index.js";
 import { Switch } from "@patternfly/react-core/dist/esm/components/Switch/index.js";
@@ -8,10 +9,12 @@ import cockpit from 'cockpit';
 
 import { StepWizard, WizardStepDef } from './stepper.jsx';
 import { ClientConfigView, sanitizeFileName } from './client-config-view.jsx';
+import { LanAccessField } from './lan-access-field.jsx';
 import {
     WgInterface, WgPeer, genKeypair, genPresharedKey, pubkeyFromPrivate,
-    saveInterface, applyLive, nextClientIp, buildClientConfig, serverSubnetCidr,
-    resolveClientEndpoint,
+    saveInterface, applyLive, nextClientIp, buildClientConfig, resolveClientEndpoint,
+    browserEndpointHost, endpointHost, isLoopbackHost, parseLanAccessList,
+    clientAllowedIpsFor, convertLegacyFirewall,
 } from './wireguard.js';
 
 const _ = cockpit.gettext;
@@ -27,10 +30,25 @@ export function AddClientWizard({ iface, onClose, onSaved }: AddClientWizardProp
     const [clientIp, setClientIp] = useState(() => nextClientIp(iface) || "");
     const [endpointOverride, setEndpointOverride] = useState("");
     const [fullTunnel, setFullTunnel] = useState(true);
+    const [lanAccessText, setLanAccessText] = useState("");
     const [usePsk, setUsePsk] = useState(true);
     const [clientConfig, setClientConfig] = useState<string | null>(null);
+    const [warning, setWarning] = useState<string | null>(null);
 
-    const defaultEndpoint = resolveClientEndpoint(iface.publicEndpoint, window.location.hostname, iface.listenPort);
+    const browserHost = browserEndpointHost();
+    const defaultEndpoint = resolveClientEndpoint(iface.publicEndpoint, browserHost, iface.listenPort);
+    const overrideText = endpointOverride.trim();
+    const overrideIsLoopback = !!overrideText && isLoopbackHost(endpointHost(overrideText));
+    const endpoint = overrideIsLoopback
+        ? null
+        : resolveClientEndpoint(overrideText || iface.publicEndpoint, browserHost, iface.listenPort);
+    const endpointError = overrideIsLoopback
+        ? _("Clients cannot reach a loopback address. Enter the public host or IP of this server.")
+        : !endpoint
+            ? _("No public endpoint is set for this tunnel. Enter the public host or IP clients use to reach this server (add :port if your router forwards another port), or set it in the tunnel settings.")
+            : null;
+    const lanAccess = useMemo(() => parseLanAccessList(lanAccessText), [lanAccessText]);
+    const lanAccessErrors = fullTunnel ? [] : lanAccess.errors;
 
     const ipValid = /^\d{1,3}(\.\d{1,3}){3}$/.test(clientIp.trim()) &&
         clientIp.trim().split(".")
@@ -47,10 +65,9 @@ export function AddClientWizard({ iface, onClose, onSaved }: AddClientWizardProp
         if (!serverPub)
             throw new Error(_("Could not determine the server public key."));
 
-        const endpoint = resolveClientEndpoint(
-            endpointOverride.trim() || iface.publicEndpoint,
-            window.location.hostname, iface.listenPort);
-        const allowedIps = fullTunnel ? "0.0.0.0/0, ::/0" : serverSubnetCidr(iface);
+        if (!endpoint)
+            throw new Error(endpointError || _("No endpoint"));
+        const allowedIps = clientAllowedIpsFor(iface, fullTunnel, lanAccess.entries);
 
         const config = buildClientConfig({
             clientPrivateKey: kp.privateKey,
@@ -72,13 +89,20 @@ export function AddClientWizard({ iface, onClose, onSaved }: AddClientWizardProp
             presharedKey: psk,
             allowedIps: [`${clientIp.trim()}/32`],
             clientAllowedIps: allowedIps,
-            clientEndpoint: endpointOverride.trim() || undefined,
+            lanAccess: fullTunnel ? undefined : lanAccess.entries,
+            clientEndpoint: overrideText || undefined,
             extraLines: [],
         };
-        iface.peers.push(peer);
-        await saveInterface(iface);
+        const convertedIface = convertLegacyFirewall(iface);
+        const updatedIface: WgInterface = { ...convertedIface, peers: [...convertedIface.peers, peer] };
+        await saveInterface(updatedIface);
         if (iface.up) {
-            try { await applyLive(iface.name) } catch { /* applied on next restart */ }
+            try {
+                await applyLive(updatedIface, iface.firewallManagement);
+            } catch (e: unknown) {
+                setWarning(cockpit.format(_("The client was saved, but the running tunnel could not be updated ($0). Restart the tunnel to apply it."),
+                                          e instanceof Error ? e.message : String(e)));
+            }
         }
 
         setClientConfig(config);
@@ -90,7 +114,7 @@ export function AddClientWizard({ iface, onClose, onSaved }: AddClientWizardProp
         {
             id: "details",
             name: _("Client"),
-            canContinue: nameValid && ipValid,
+            canContinue: nameValid && ipValid && !endpointError && lanAccessErrors.length === 0,
             nextLabel: _("Create client"),
             onNext: createClient,
             content: (
@@ -118,11 +142,15 @@ export function AddClientWizard({ iface, onClose, onSaved }: AddClientWizardProp
                     <FormGroup label={_("Endpoint")} fieldId="wg-client-endpoint">
                         <TextInput
                             id="wg-client-endpoint" value={endpointOverride} onChange={(_ev, v) => setEndpointOverride(v)}
-                            placeholder={defaultEndpoint}
+                            placeholder={defaultEndpoint || "vpn.example.com:51820"}
+                            validated={endpointError ? "error" : "default"}
                         />
                         <HelperText>
-                            <HelperTextItem>
-                                {cockpit.format(_("Where this client connects. Leave blank to use the tunnel default ($0)."), defaultEndpoint)}
+                            <HelperTextItem variant={endpointError ? "error" : "default"}>
+                                {endpointError ||
+                                    (defaultEndpoint
+                                        ? cockpit.format(_("Where this client connects. Leave blank to use the tunnel default ($0)."), defaultEndpoint)
+                                        : _("Where this client connects."))}
                             </HelperTextItem>
                         </HelperText>
                     </FormGroup>
@@ -135,10 +163,17 @@ export function AddClientWizard({ iface, onClose, onSaved }: AddClientWizardProp
                         />
                         <HelperText>
                             <HelperTextItem>
-                                {_("Off means the client only reaches the VPN subnet (split tunnel).")}
+                                {_("Off means the client only reaches the VPN subnet and its LAN access entries (split tunnel).")}
                             </HelperTextItem>
                         </HelperText>
                     </FormGroup>
+
+                    {!fullTunnel && (
+                        <LanAccessField
+                            id="wg-client-lan-access" value={lanAccessText} onChange={setLanAccessText}
+                            errors={lanAccessErrors} firewallManagement={iface.firewallManagement}
+                        />
+                    )}
 
                     <FormGroup fieldId="wg-client-psk" label={_("Security")}>
                         <Switch
@@ -163,6 +198,7 @@ export function AddClientWizard({ iface, onClose, onSaved }: AddClientWizardProp
             cancelLabel: _("Done"),
             content: (
                 <div className="wg-form">
+                    {warning && <Alert variant="warning" isInline title={warning} />}
                     <HelperText>
                         <HelperTextItem variant="success">
                             {_("Client created. Share this configuration now — you can also view or re-download it later from the client's details.")}

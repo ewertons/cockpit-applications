@@ -53,9 +53,12 @@ jobs:
 
   unit-test:
     runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        app: [cockpit-git-server, cockpit-wireguard]
     defaults:
       run:
-        working-directory: cockpit-git-server
+        working-directory: ${{ matrix.app }}
     steps:
       - name: Clone repository
         uses: actions/checkout@v6

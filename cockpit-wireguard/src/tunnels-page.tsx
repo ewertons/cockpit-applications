@@ -5,6 +5,7 @@ import { Card, CardBody, CardTitle } from "@patternfly/react-core/dist/esm/compo
 import { DescriptionList, DescriptionListDescription, DescriptionListGroup, DescriptionListTerm } from "@patternfly/react-core/dist/esm/components/DescriptionList/index.js";
 import { EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter } from "@patternfly/react-core/dist/esm/components/EmptyState/index.js";
 import { FormGroup } from "@patternfly/react-core/dist/esm/components/Form/index.js";
+import { HelperText, HelperTextItem } from "@patternfly/react-core/dist/esm/components/HelperText/index.js";
 import { Label } from "@patternfly/react-core/dist/esm/components/Label/index.js";
 import { Modal, ModalBody, ModalFooter, ModalHeader } from "@patternfly/react-core/dist/esm/components/Modal/index.js";
 import { Spinner } from "@patternfly/react-core/dist/esm/components/Spinner/index.js";
@@ -16,7 +17,7 @@ import cockpit from 'cockpit';
 import { CreateTunnelWizard } from './create-tunnel-wizard.jsx';
 import {
     WgInterface, loadInterfaces, bringUp, bringDown, setEnabledAtBoot,
-    deleteInterface, saveInterface, applyLive, isPeerActive,
+    deleteInterface, saveInterface, applyLive, isPeerActive, endpointHost, isLoopbackHost,
 } from './wireguard.js';
 
 const _ = cockpit.gettext;
@@ -266,6 +267,7 @@ function EditTunnelDialog({ iface, onClose, onSaved }: EditTunnelDialogProps) {
     const portValid = listenPort.trim() === "" ? false : !isNaN(port) && port >= 1 && port <= 65535;
     const addressValid = address.split(",").map(s => s.trim())
             .filter(Boolean).length > 0;
+    const publicEndpointIsLoopback = !!publicEndpoint.trim() && isLoopbackHost(endpointHost(publicEndpoint));
 
     const save = async () => {
         setSaving(true);
@@ -281,7 +283,7 @@ function EditTunnelDialog({ iface, onClose, onSaved }: EditTunnelDialogProps) {
             };
             await saveInterface(updated);
             if (iface.up) {
-                try { await applyLive(iface.name) } catch { /* applied on next restart */ }
+                try { await applyLive(updated) } catch { /* applied on next restart */ }
             }
             onSaved();
             onClose();
@@ -313,7 +315,15 @@ function EditTunnelDialog({ iface, onClose, onSaved }: EditTunnelDialogProps) {
                         <TextInput
                             id="edit-endpoint" value={publicEndpoint} onChange={(_ev, v) => setPublicEndpoint(v)}
                             placeholder="vpn.example.com"
+                            validated={publicEndpointIsLoopback ? "error" : "default"}
                         />
+                        {publicEndpointIsLoopback && (
+                            <HelperText>
+                                <HelperTextItem variant="error">
+                                    {_("Clients cannot reach a loopback address. Enter the public host or IP of this server.")}
+                                </HelperTextItem>
+                            </HelperText>
+                        )}
                     </FormGroup>
                     <FormGroup label={_("Client DNS")} fieldId="edit-clientdns">
                         <TextInput
@@ -324,7 +334,7 @@ function EditTunnelDialog({ iface, onClose, onSaved }: EditTunnelDialogProps) {
                 </div>
             </ModalBody>
             <ModalFooter>
-                <Button variant="primary" onClick={save} isLoading={saving} isDisabled={saving || !portValid || !addressValid}>
+                <Button variant="primary" onClick={save} isLoading={saving} isDisabled={saving || !portValid || !addressValid || publicEndpointIsLoopback}>
                     {_("Save")}
                 </Button>
                 <Button variant="link" onClick={onClose}>{_("Cancel")}</Button>
