@@ -72,10 +72,21 @@ write_if_changed() {
     if [[ -f "$file" ]] && [[ "$(cat "$file")" == "$content" ]]; then
         return 1
     fi
-    mkdir -p "$(dirname "$file")"
-    printf '%s\n' "$content" > "$file"
-    chmod 644 "$file"
+    # Callers test the return value, which disables set -e here.
+    mkdir -p "$(dirname "$file")" || exit 1
+    printf '%s\n' "$content" > "$file" || exit 1
+    chmod 644 "$file" || exit 1
     echo "    Wrote $file"
+}
+
+# listening_beyond_loopback: true if port 9090 listens on any address but
+# 127.0.0.1, or if that can't be checked.
+listening_beyond_loopback() {
+    local addresses
+    command -v ss &>/dev/null || return 0
+    addresses="$(ss -Hltn 'sport = :9090' | awk '{print $4}')" || return 0
+    [[ -n "$addresses" ]] || return 1
+    grep -qvx '127\.0\.0\.1:9090' <<<"$addresses"
 }
 
 # Written before the package is installed, so the socket never listens on the network.
@@ -90,8 +101,9 @@ ListenStream=127.0.0.1:9090
 EOF
     then
         SOCKET_CHANGED=true
-        systemctl daemon-reload
     fi
+    # Every run, so a previous run that stopped early still takes effect.
+    systemctl daemon-reload
     if [[ ! -s "$COCKPIT_CONF" ]] || [[ "$(head -1 "$COCKPIT_CONF")" == "$MANAGED_HEADER" ]]; then
         write_if_changed "$COCKPIT_CONF" <<EOF || true
 $MANAGED_HEADER
@@ -134,6 +146,9 @@ if systemctl list-unit-files cockpit.socket &>/dev/null 2>&1; then
     if ! systemctl is-active cockpit.socket &>/dev/null 2>&1; then
         echo "==> Starting cockpit.socket..."
         systemctl start cockpit.socket
+    fi
+    if $LOCAL_ONLY && ! $SOCKET_CHANGED && listening_beyond_loopback; then
+        SOCKET_CHANGED=true
     fi
     if $SOCKET_CHANGED; then
         echo "==> Restarting cockpit.socket on the new address..."
