@@ -98,7 +98,7 @@ export function AddClientWizard({ iface, onClose, onSaved }: AddClientWizardProp
         await saveInterface(updatedIface);
         if (iface.up) {
             try {
-                await applyLive(updatedIface, iface.firewallManagement);
+                await applyLive(updatedIface);
             } catch (e: unknown) {
                 setWarning(cockpit.format(_("The client was saved, but the running tunnel could not be updated ($0). Restart the tunnel to apply it."),
                                           e instanceof Error ? e.message : String(e)));

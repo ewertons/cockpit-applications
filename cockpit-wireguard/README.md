@@ -40,8 +40,10 @@ split-tunnel clients reach the VPN subnet and their listed destinations only;
 full-tunnel clients reach anything. Changes apply on save, without restarting
 the tunnel. Tunnels created by earlier versions are switched to these rules the
 first time a client is saved; clients that were never edited keep unrestricted
-forwarding until they are. Rules written by hand or by other tools are never
-changed, and LAN access then only affects the client configuration.
+forwarding until they are. Rules written or edited by hand, or by other tools,
+are never changed, and LAN access then only affects the client configuration.
+A client whose peer `AllowedIPs` overlaps another's is governed by its most
+specific match, as in WireGuard.
 
 ## Quick Install
 
