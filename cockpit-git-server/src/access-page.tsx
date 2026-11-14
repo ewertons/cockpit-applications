@@ -9,50 +9,126 @@ import { TextInput } from "@patternfly/react-core/dist/esm/components/TextInput/
 import { FormGroup } from "@patternfly/react-core/dist/esm/components/Form/index.js";
 import { EmptyState, EmptyStateBody, EmptyStateFooter, EmptyStateActions } from "@patternfly/react-core/dist/esm/components/EmptyState/index.js";
 import { Label } from "@patternfly/react-core/dist/esm/components/Label/index.js";
+import { Checkbox } from "@patternfly/react-core/dist/esm/components/Checkbox/index.js";
 
 import cockpit from 'cockpit';
 
+import {
+    AuthorizedKeyLine,
+    KeyRestrictions,
+    ValidationError,
+    appendKeyLine,
+    buildOptions,
+    parseAuthorizedKeyLine,
+    parseAuthorizedKeys,
+    removeKeyLine,
+    replaceKeyLine,
+    restrictionsFromOptions,
+    sameKey,
+    serializeKeyLine,
+    validateComment,
+    validatePublicKey,
+    validateRestrictions,
+} from './authorized-keys.js';
+import { SshdHardeningCard } from './sshd-hardening.jsx';
+
 const _ = cockpit.gettext;
-const AUTH_KEYS_PATH = "/srv/git/.ssh/authorized_keys";
+const GIT_ROOT = "/srv/git";
+const SSH_DIRECTORY = GIT_ROOT + "/.ssh";
+const AUTH_KEYS_PATH = SSH_DIRECTORY + "/authorized_keys";
 
-interface SSHKey {
-    type: string;
-    key: string;
-    comment: string;
-    line: number;
+function defaultRestrictions(): KeyRestrictions {
+    return { restrict: true, fromAddresses: "", expiryTime: "", otherOptions: [] };
 }
 
-function parseAuthorizedKeys(content: string): SSHKey[] {
-    return content.trim().split("\n")
-            .filter(Boolean)
-            .map((line, i) => {
-            // Skip comment lines
-                if (line.startsWith("#")) return null;
-                const parts = line.trim().split(/\s+/);
-                if (parts.length < 2) return null;
-                return {
-                    type: parts[0],
-                    key: parts[1],
-                    comment: parts.slice(2).join(" "),
-                    line: i,
-                };
-            })
-            .filter(Boolean) as SSHKey[];
-}
-
-function fingerprint(key: string): string {
-    // Show a truncated version of the key as a simple fingerprint display
-    if (key.length > 20) {
-        return key.substring(0, 10) + "..." + key.substring(key.length - 10);
+function validationMessage(error: ValidationError): string {
+    switch (error) {
+    case "invalid-key-format":
+        return _("Invalid SSH public key format. Paste a single line such as \"ssh-ed25519 AAAA... user@host\".");
+    case "unsupported-key-type":
+        return _("Unsupported key type. Use ssh-ed25519, ssh-rsa, ecdsa-sha2-* or a security key type.");
+    case "invalid-key-data":
+        return _("The key data is not valid for its key type.");
+    case "options-in-key":
+        return _("Paste the public key without options; use the restriction fields instead.");
+    case "invalid-comment":
+        return _("The label must not contain quotes, backslashes or control characters.");
+    case "invalid-from-addresses":
+        return _("Allowed sources must be a comma-separated list of addresses, CIDR ranges or host names, without spaces or quotes.");
+    case "invalid-expiry-time":
+        return _("Expiry time must be YYYYMMDD or YYYYMMDDHHMM[SS], optionally followed by Z for UTC.");
     }
-    return key;
 }
 
-const SSH_KEY_REGEX = /^(ssh-rsa|ssh-ed25519|ssh-dss|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)\s+[A-Za-z0-9+/=]+/;
+/** Apply a change to authorized_keys atomically and restore the ownership and modes sshd requires. */
+async function updateAuthorizedKeys(transform: (content: string) => string): Promise<void> {
+    const owner = (await cockpit.spawn(["stat", "-c", "%U:%G", GIT_ROOT], { superuser: "require", err: "message" })).trim();
+    const [ownerUser, ownerGroup] = owner.split(":");
+    await cockpit.spawn(["install", "-d", "-m", "0700", "-o", ownerUser, "-g", ownerGroup, SSH_DIRECTORY],
+                        { superuser: "require", err: "message" });
+
+    // modify() writes through a temporary file and rename, and fails if the file changed meanwhile.
+    const handle = cockpit.file(AUTH_KEYS_PATH, { superuser: "require" });
+    try {
+        await handle.modify((current: string | null) => transform(current || ""));
+    } finally {
+        handle.close();
+    }
+
+    await cockpit.spawn(["chmod", "600", AUTH_KEYS_PATH], { superuser: "require", err: "message" });
+    await cockpit.spawn(["chown", owner, AUTH_KEYS_PATH], { superuser: "require", err: "message" });
+}
+
+async function keyFingerprint(key: AuthorizedKeyLine): Promise<string> {
+    const keygenProcess = cockpit.spawn(["ssh-keygen", "-lf", "-"], { err: "message" });
+    keygenProcess.input(`${key.keyType} ${key.keyBlob}\n`);
+    return (await keygenProcess).trim().split(/\s+/)[1] ?? "";
+}
+
+interface RestrictionFieldsProps {
+    idPrefix: string;
+    restrictions: KeyRestrictions;
+    onChange: (restrictions: KeyRestrictions) => void;
+}
+
+const RestrictionFields = ({ idPrefix, restrictions, onChange }: RestrictionFieldsProps) => (
+    <>
+        <div style={{ marginTop: "1rem" }}>
+            <Checkbox
+                id={idPrefix + "-restrict"}
+                label={_("Restrict (recommended)")}
+                description={_("Disables port, agent and X11 forwarding and terminal allocation. Git over SSH keeps working.")}
+                isChecked={restrictions.restrict}
+                onChange={(_event, value) => onChange({ ...restrictions, restrict: value })}
+            />
+        </div>
+        <FormGroup label={_("Allowed sources (optional)")} fieldId={idPrefix + "-from"} style={{ marginTop: "1rem" }}>
+            <TextInput
+                id={idPrefix + "-from"}
+                value={restrictions.fromAddresses}
+                onChange={(_event, value) => onChange({ ...restrictions, fromAddresses: value })}
+                placeholder="10.0.0.5,192.168.1.0/24,*.example.com"
+            />
+        </FormGroup>
+        <FormGroup label={_("Expiry time (optional)")} fieldId={idPrefix + "-expiry"} style={{ marginTop: "1rem" }}>
+            <TextInput
+                id={idPrefix + "-expiry"}
+                value={restrictions.expiryTime}
+                onChange={(_event, value) => onChange({ ...restrictions, expiryTime: value })}
+                placeholder="YYYYMMDD"
+            />
+        </FormGroup>
+        {restrictions.otherOptions.length > 0 && (
+            <p style={{ marginTop: "1rem" }}>
+                {cockpit.format(_("Other options kept as they are: $0"), restrictions.otherOptions.join(","))}
+            </p>
+        )}
+    </>
+);
 
 export const AccessPage = () => {
-    const [keys, setKeys] = useState<SSHKey[]>([]);
-    const [rawContent, setRawContent] = useState("");
+    const [keys, setKeys] = useState<AuthorizedKeyLine[]>([]);
+    const [fingerprints, setFingerprints] = useState<Record<string, string>>({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [gitoliteDetected, setGitoliteDetected] = useState(false);
@@ -61,11 +137,18 @@ export const AccessPage = () => {
     const [showAdd, setShowAdd] = useState(false);
     const [newKeyContent, setNewKeyContent] = useState("");
     const [newKeyLabel, setNewKeyLabel] = useState("");
+    const [newKeyRestrictions, setNewKeyRestrictions] = useState<KeyRestrictions>(defaultRestrictions());
     const [addError, setAddError] = useState("");
     const [adding, setAdding] = useState(false);
     const [generating, setGenerating] = useState(false);
     const [generatedPrivateKey, setGeneratedPrivateKey] = useState("");
     const [keyDir, setKeyDir] = useState("");
+
+    // Edit restrictions modal
+    const [editedKey, setEditedKey] = useState<AuthorizedKeyLine | null>(null);
+    const [editedRestrictions, setEditedRestrictions] = useState<KeyRestrictions>(defaultRestrictions());
+    const [editError, setEditError] = useState("");
+    const [saving, setSaving] = useState(false);
 
     const loadKeys = useCallback(() => {
         setLoading(true);
@@ -76,15 +159,13 @@ export const AccessPage = () => {
                 .then(() => setGitoliteDetected(true))
                 .catch(() => setGitoliteDetected(false));
 
-        cockpit.file(AUTH_KEYS_PATH, { superuser: true }).read()
+        cockpit.file(AUTH_KEYS_PATH, { superuser: "require" }).read()
                 .then((content: string) => {
-                    setRawContent(content || "");
                     setKeys(parseAuthorizedKeys(content || ""));
                     setLoading(false);
                 })
                 .catch((ex: cockpit.BasicError) => {
                     if (ex.problem === "not-found") {
-                        setRawContent("");
                         setKeys([]);
                     } else {
                         setError(ex.message || String(ex));
@@ -95,38 +176,51 @@ export const AccessPage = () => {
 
     useEffect(() => { loadKeys() }, [loadKeys]);
 
+    useEffect(() => {
+        let cancelled = false;
+        Promise.all(keys.map(key => keyFingerprint(key).catch(() => "")))
+                .then(results => {
+                    if (cancelled)
+                        return;
+                    const byBlob: Record<string, string> = {};
+                    keys.forEach((key, index) => { byBlob[key.keyBlob] = results[index] });
+                    setFingerprints(byBlob);
+                });
+        return () => { cancelled = true };
+    }, [keys]);
+
     const handleAddKey = () => {
         const keyContent = newKeyContent.trim();
         if (!keyContent) return;
 
-        // Validate SSH key format
-        if (!SSH_KEY_REGEX.test(keyContent)) {
-            setAddError(_("Invalid SSH public key format. Key must start with a valid key type (e.g. ssh-rsa, ssh-ed25519)."));
+        const keyError = validatePublicKey(keyContent) ??
+            validateComment(newKeyLabel.trim()) ??
+            validateRestrictions(newKeyRestrictions);
+        if (keyError) {
+            setAddError(validationMessage(keyError));
             return;
         }
+
+        const parsed = parseAuthorizedKeyLine(keyContent);
+        if (!parsed)
+            return;
+        const newLine = serializeKeyLine({
+            options: buildOptions(newKeyRestrictions),
+            keyType: parsed.keyType,
+            keyBlob: parsed.keyBlob,
+            comment: parsed.comment || newKeyLabel.trim(),
+        });
 
         setAdding(true);
         setAddError("");
 
-        // Append key with optional comment
-        let newLine = keyContent;
-        if (newKeyLabel.trim() && !keyContent.split(/\s+/).slice(2)
-                .join(" ")) {
-            newLine = keyContent + " " + newKeyLabel.trim();
-        }
-
-        const newContent = rawContent ? rawContent.trimEnd() + "\n" + newLine + "\n" : newLine + "\n";
-
-        // Ensure .ssh directory exists first, detect owner of /srv/git
-        cockpit.spawn(["stat", "-c", "%U:%G", "/srv/git"], { superuser: "require" })
-                .then(owner => {
-                    const gitOwner = owner.trim();
-                    return cockpit.spawn(["mkdir", "-p", "/srv/git/.ssh"], { superuser: "require" })
-                            .then(() => cockpit.spawn(["chmod", "700", "/srv/git/.ssh"], { superuser: "require" }))
-                            .then(() => cockpit.file(AUTH_KEYS_PATH, { superuser: true }).replace(newContent))
-                            .then(() => cockpit.spawn(["chmod", "600", AUTH_KEYS_PATH], { superuser: "require" }))
-                            .then(() => cockpit.spawn(["chown", "-R", gitOwner, "/srv/git/.ssh"], { superuser: "require" }));
-                })
+        keyFingerprint(parsed)
+                .catch(() => { throw new Error(validationMessage("invalid-key-data")) })
+                .then(() => updateAuthorizedKeys(content => {
+                    if (parseAuthorizedKeys(content).some(key => sameKey(key, parsed)))
+                        throw new Error(_("That key is already authorized."));
+                    return appendKeyLine(content, newLine);
+                }))
                 .then(() => {
                     if (keyDir)
                         cockpit.spawn(["rm", "-rf", keyDir], { err: "ignore" });
@@ -134,24 +228,62 @@ export const AccessPage = () => {
                     setShowAdd(false);
                     setNewKeyContent("");
                     setNewKeyLabel("");
+                    setNewKeyRestrictions(defaultRestrictions());
                     setAdding(false);
                     setGeneratedPrivateKey("");
                     loadKeys();
                 })
-                .catch((ex: cockpit.BasicError) => {
+                .catch((ex: Error) => {
                     setAddError(ex.message || String(ex));
                     setAdding(false);
                 });
     };
 
-    const handleRemoveKey = (keyToRemove: SSHKey) => {
-        const lines = rawContent.split("\n");
-        const newLines = lines.filter((_line, i) => i !== keyToRemove.line);
-        const newContent = newLines.join("\n");
-
-        cockpit.file(AUTH_KEYS_PATH, { superuser: true }).replace(newContent)
+    const handleRemoveKey = (keyToRemove: AuthorizedKeyLine) => {
+        setError("");
+        updateAuthorizedKeys(content => {
+            const updated = removeKeyLine(content, keyToRemove.raw);
+            if (updated === null)
+                throw new Error(_("That key is no longer in the file."));
+            return updated;
+        })
                 .then(() => loadKeys())
-                .catch((ex: cockpit.BasicError) => setError(ex.message || String(ex)));
+                .catch((ex: Error) => setError(ex.message || String(ex)));
+    };
+
+    const openEdit = (key: AuthorizedKeyLine) => {
+        setEditedKey(key);
+        setEditedRestrictions(restrictionsFromOptions(key.options));
+        setEditError("");
+    };
+
+    const handleSaveRestrictions = () => {
+        if (!editedKey)
+            return;
+        const restrictionsError = validateRestrictions(editedRestrictions);
+        if (restrictionsError) {
+            setEditError(validationMessage(restrictionsError));
+            return;
+        }
+
+        const newLine = serializeKeyLine({ ...editedKey, options: buildOptions(editedRestrictions, editedKey.options) });
+        setSaving(true);
+        setEditError("");
+        updateAuthorizedKeys(content => {
+            const updated = replaceKeyLine(content, editedKey.raw, newLine);
+            if (updated === null)
+                throw new Error(_("That key is no longer in the file."));
+            return updated;
+        })
+                .then(() => {
+                    setSaving(false);
+                    setEditedKey(null);
+                    loadKeys();
+                })
+                .catch((ex: Error) => {
+                    setEditError(ex.message || String(ex));
+                    setSaving(false);
+                });
     };
 
     const handleGenerateKey = () => {
@@ -200,6 +332,7 @@ export const AccessPage = () => {
         setShowAdd(false);
         setAddError("");
         setGeneratedPrivateKey("");
+        setNewKeyRestrictions(defaultRestrictions());
     };
 
     const getKeyFilename = () => {
@@ -287,15 +420,25 @@ export const AccessPage = () => {
                                 <CardBody>
                                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                                         <div>
-                                            <Label color="blue" style={{ marginRight: "0.5rem" }}>{k.type}</Label>
+                                            <Label color="blue" style={{ marginRight: "0.5rem" }}>{k.keyType}</Label>
                                             <strong>{k.comment || _("(no label)")}</strong>
                                             <div className="key-fingerprint" style={{ marginTop: "0.25rem" }}>
-                                                {fingerprint(k.key)}
+                                                {fingerprints[k.keyBlob] || k.keyBlob.slice(-16)}
+                                            </div>
+                                            <div className="key-options" style={{ marginTop: "0.25rem" }}>
+                                                {k.options
+                                                    ? <code>{k.options}</code>
+                                                    : <Label color="orange">{_("Unrestricted")}</Label>}
                                             </div>
                                         </div>
-                                        <Button variant="danger" onClick={() => handleRemoveKey(k)}>
-                                            {_("Remove")}
-                                        </Button>
+                                        <div>
+                                            <Button variant="secondary" onClick={() => openEdit(k)} style={{ marginRight: "0.5rem" }}>
+                                                {_("Edit restrictions")}
+                                            </Button>
+                                            <Button variant="danger" onClick={() => handleRemoveKey(k)}>
+                                                {_("Remove")}
+                                            </Button>
+                                        </div>
                                     </div>
                                 </CardBody>
                             </Card>
@@ -334,6 +477,7 @@ export const AccessPage = () => {
                                 {_("Generate")}
                             </Button>
                         </FormGroup>
+                        <RestrictionFields idPrefix="new-key" restrictions={newKeyRestrictions} onChange={setNewKeyRestrictions} />
                         {generatedPrivateKey && (
                             <Alert variant="warning" title={_("Private key generated")} isInline style={{ marginTop: "1rem" }}>
                                 {_("Download the private key now. It is discarded when this dialog closes.")}
@@ -366,6 +510,27 @@ export const AccessPage = () => {
                     </ModalFooter>
                 </Modal>
             )}
+
+            {editedKey && (
+                <Modal variant="medium" isOpen onClose={() => setEditedKey(null)}>
+                    <ModalHeader title={cockpit.format(_("Edit restrictions of $0"), editedKey.comment || editedKey.keyType)} />
+                    <ModalBody>
+                        {editError && <Alert variant="danger" title={editError} isInline style={{ marginBottom: "1rem" }} />}
+                        <div className="key-fingerprint">{fingerprints[editedKey.keyBlob] || editedKey.keyType}</div>
+                        <RestrictionFields idPrefix="edit-key" restrictions={editedRestrictions} onChange={setEditedRestrictions} />
+                    </ModalBody>
+                    <ModalFooter>
+                        <Button variant="primary" onClick={handleSaveRestrictions} isLoading={saving} isDisabled={saving}>
+                            {_("Save")}
+                        </Button>
+                        <Button variant="link" onClick={() => setEditedKey(null)}>
+                            {_("Cancel")}
+                        </Button>
+                    </ModalFooter>
+                </Modal>
+            )}
+
+            <SshdHardeningCard />
         </>
     );
 };
