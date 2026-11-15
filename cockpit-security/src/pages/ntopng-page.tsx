@@ -10,8 +10,20 @@ import { Switch } from "@patternfly/react-core/dist/esm/components/Switch/index.
 import { DescriptionList, DescriptionListGroup, DescriptionListTerm, DescriptionListDescription } from "@patternfly/react-core/dist/esm/components/DescriptionList/index.js";
 import { Grid, GridItem } from "@patternfly/react-core/dist/esm/layouts/Grid/index.js";
 import { ClipboardCopy } from "@patternfly/react-core/dist/esm/components/ClipboardCopy/index.js";
+import { Checkbox } from "@patternfly/react-core/dist/esm/components/Checkbox/index.js";
+import { Modal, ModalBody, ModalFooter, ModalHeader } from "@patternfly/react-core/dist/esm/components/Modal/index.js";
 
 import cockpit from 'cockpit';
+
+import {
+    NTOPNG_CONFIG_PATH,
+    NTOPNG_DEFAULT_HTTP_PORT,
+    SET_ADMIN_PASSWORD_SCRIPT,
+    configureListeners,
+    httpPortFromConfig,
+    listenersAreLoopbackOnly,
+    validateAdminPassword,
+} from './ntopng-config.js';
 
 const _ = cockpit.gettext;
 
@@ -53,6 +65,16 @@ export const NtopngPage = () => {
     const [status, setStatus] = useState<NtopngStatus | null>(null);
     const [localInstalled, setLocalInstalled] = useState<boolean | null>(null);
     const [localRunning, setLocalRunning] = useState(false);
+    const [localLoopbackOnly, setLocalLoopbackOnly] = useState<boolean | null>(null);
+    const [localHttpPort, setLocalHttpPort] = useState(NTOPNG_DEFAULT_HTTP_PORT);
+
+    // Local setup dialog
+    const [showLocalSetup, setShowLocalSetup] = useState(false);
+    const [setupPassword, setSetupPassword] = useState("");
+    const [setupPasswordConfirm, setSetupPasswordConfirm] = useState("");
+    const [setupListenOnAllInterfaces, setSetupListenOnAllInterfaces] = useState(false);
+    const [settingUpLocal, setSettingUpLocal] = useState(false);
+    const [setupError, setSetupError] = useState("");
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [success, setSuccess] = useState("");
@@ -61,7 +83,7 @@ export const NtopngPage = () => {
     const [showAddForm, setShowAddForm] = useState(false);
     const [formUrl, setFormUrl] = useState("http://localhost:3000");
     const [formUser, setFormUser] = useState("admin");
-    const [formPass, setFormPass] = useState("admin");
+    const [formPass, setFormPass] = useState("");
     const [formLabel, setFormLabel] = useState("");
 
     // NetFlow config
@@ -87,12 +109,24 @@ export const NtopngPage = () => {
         try {
             await cockpit.spawn(["which", "ntopng"], { err: "ignore" });
             setLocalInstalled(true);
-            const status = await cockpit.spawn(["systemctl", "is-active", "ntopng"], { err: "ignore" });
+            const status = await cockpit.spawn(["systemctl", "is-active", "ntopng"], { err: "ignore" })
+                    .catch(() => "inactive");
             setLocalRunning(status.trim() === "active");
+            await readLocalListener();
         } catch {
             setLocalInstalled(false);
         }
         setLoading(false);
+    };
+
+    const readLocalListener = async () => {
+        try {
+            const content = await cockpit.file(NTOPNG_CONFIG_PATH, { superuser: "try" }).read();
+            setLocalLoopbackOnly(listenersAreLoopbackOnly(content ?? ""));
+            setLocalHttpPort(httpPortFromConfig(content ?? ""));
+        } catch {
+            setLocalLoopbackOnly(null);
+        }
     };
 
     const loadConfig = async () => {
@@ -263,29 +297,68 @@ export const NtopngPage = () => {
                 setLocalRunning(false);
                 setSuccess(_("ntopng stopped"));
             } else {
+                const localInstance = instances.find(i => i.id === "local");
+                if (!localInstance || localInstance.password === "admin") {
+                    openLocalSetup();
+                    return;
+                }
                 await cockpit.spawn(["systemctl", "start", "ntopng"], { superuser: "require" });
                 await cockpit.spawn(["systemctl", "enable", "ntopng"], { superuser: "require" });
                 setLocalRunning(true);
                 setSuccess(_("ntopng started and enabled"));
-                // Auto-add local instance
-                const localInst: NtopngInstance = {
-                    id: "local",
-                    url: "http://127.0.0.1:3000",
-                    username: "admin",
-                    password: "admin",
-                    isLocal: true,
-                    label: "Local",
-                };
-                if (!instances.find(i => i.id === "local")) {
-                    const newInstances = [localInst, ...instances];
-                    await saveConfig(newInstances);
-                    setActiveInstance(localInst);
-                    setTimeout(() => testConnection(localInst), 3000);
-                }
             }
         } catch (e) {
             setError(String(e));
         }
+    };
+
+    const openLocalSetup = () => {
+        setSetupPassword("");
+        setSetupPasswordConfirm("");
+        setSetupListenOnAllInterfaces(localLoopbackOnly === false && instances.some(i => i.id === "local"));
+        setSetupError("");
+        setShowLocalSetup(true);
+    };
+
+    const setUpLocalNtopng = async () => {
+        const validationError = validateAdminPassword(setupPassword, setupPasswordConfirm);
+        if (validationError) {
+            setSetupError(_(validationError));
+            return;
+        }
+        setSettingUpLocal(true);
+        setSetupError("");
+        try {
+            const configContent = await cockpit.file(NTOPNG_CONFIG_PATH, { superuser: "require" })
+                    .modify((content: string | null) => configureListeners(content ?? "", setupListenOnAllInterfaces));
+            await cockpit.spawn(["systemctl", "enable", "ntopng"], { superuser: "require", err: "message" });
+            await cockpit.spawn(["systemctl", "restart", "ntopng"], { superuser: "require", err: "message" });
+            setLocalRunning(true);
+
+            const passwordProcess = cockpit.spawn(["sh", "-c", SET_ADMIN_PASSWORD_SCRIPT], { superuser: "require", err: "message" });
+            passwordProcess.input(setupPassword);
+            await passwordProcess;
+
+            const port = httpPortFromConfig(configContent);
+            const localInstance: NtopngInstance = {
+                id: "local",
+                url: `http://127.0.0.1:${port}`,
+                username: "admin",
+                password: setupPassword,
+                isLocal: true,
+                label: "Local",
+            };
+            await saveConfig([localInstance, ...instances.filter(i => i.id !== "local")]);
+            setActiveInstance(localInstance);
+            setLocalLoopbackOnly(listenersAreLoopbackOnly(configContent));
+            setLocalHttpPort(port);
+            setShowLocalSetup(false);
+            setSuccess(_("ntopng configured, started and enabled"));
+            setTimeout(() => testConnection(localInstance), 3000);
+        } catch (e: any) {
+            setSetupError(e.message || String(e));
+        }
+        setSettingUpLocal(false);
     };
 
     const addInstance = async () => {
@@ -308,7 +381,7 @@ export const NtopngPage = () => {
         setShowAddForm(false);
         setFormUrl("http://localhost:3000");
         setFormUser("admin");
-        setFormPass("admin");
+        setFormPass("");
         setFormLabel("");
     };
 
@@ -386,12 +459,65 @@ ntopng -i "ntopng -i tcp://${routerIP || "<ROUTER_IP>"}:${netflowPort}" -m "${nt
                                         isChecked={localRunning}
                                         onChange={toggleNtopng}
                                     />
+                                    <Button variant="secondary" className="pf-v6-u-ml-md" size="sm" onClick={openLocalSetup}>
+                                        {_("Set password and listen address")}
+                                    </Button>
                                 </DescriptionListDescription>
                             </DescriptionListGroup>
                         )}
                     </DescriptionList>
+                    {localInstalled && instances.find(i => i.id === "local")?.password === "admin" && (
+                        <Alert variant="warning" isInline className="pf-v6-u-mt-md" title={_("The local ntopng instance uses the default admin password. Set a new password.")} />
+                    )}
+                    {localInstalled && localLoopbackOnly === false && (
+                        <Alert variant="warning" isInline className="pf-v6-u-mt-md" title={_("The ntopng web interface listens on all network interfaces.")}>
+                            {_("Restrict it to 127.0.0.1 unless other machines must reach it directly.")}
+                        </Alert>
+                    )}
+                    {localInstalled && localLoopbackOnly === true && (
+                        <p className="pf-v6-u-mt-md">
+                            {cockpit.format(_("The web interface only listens on 127.0.0.1. To open it from another machine, use an SSH tunnel: ssh -L $0:127.0.0.1:$0 <user>@<this server>"), String(localHttpPort))}
+                        </p>
+                    )}
                 </CardBody>
             </Card>
+
+            {showLocalSetup && (
+                <Modal variant="small" isOpen onClose={() => setShowLocalSetup(false)}>
+                    <ModalHeader title={_("Set up local ntopng")} />
+                    <ModalBody>
+                        {setupError && <Alert variant="danger" isInline title={setupError} className="pf-v6-u-mb-md" />}
+                        <FormGroup label={_("New admin password")} isRequired fieldId="ntopng-setup-password">
+                            <TextInput id="ntopng-setup-password" type="password" value={setupPassword} onChange={(_e, v) => setSetupPassword(v)} />
+                        </FormGroup>
+                        <FormGroup label={_("Confirm password")} isRequired fieldId="ntopng-setup-password-confirm" className="pf-v6-u-mt-sm">
+                            <TextInput id="ntopng-setup-password-confirm" type="password" value={setupPasswordConfirm} onChange={(_e, v) => setSetupPasswordConfirm(v)} />
+                        </FormGroup>
+                        <Checkbox
+                            id="ntopng-setup-listen-all"
+                            className="pf-v6-u-mt-md"
+                            label={_("Listen on all network interfaces")}
+                            description={_("Off: the web interface only listens on 127.0.0.1 (use Cockpit or an SSH tunnel). On: any machine that can reach this server can open the ntopng login page.")}
+                            isChecked={setupListenOnAllInterfaces}
+                            onChange={(_e, checked) => setSetupListenOnAllInterfaces(checked)}
+                        />
+                        {setupListenOnAllInterfaces && (
+                            <Alert variant="warning" isInline className="pf-v6-u-mt-sm" title={_("ntopng will be reachable from the network. Restrict access with a firewall.")} />
+                        )}
+                        <p className="pf-v6-u-mt-md">
+                            {cockpit.format(_("This updates $0 and restarts ntopng."), NTOPNG_CONFIG_PATH)}
+                        </p>
+                    </ModalBody>
+                    <ModalFooter>
+                        <Button variant="primary" onClick={setUpLocalNtopng} isLoading={settingUpLocal} isDisabled={settingUpLocal || !setupPassword}>
+                            {_("Apply")}
+                        </Button>
+                        <Button variant="link" onClick={() => setShowLocalSetup(false)}>
+                            {_("Cancel")}
+                        </Button>
+                    </ModalFooter>
+                </Modal>
+            )}
 
             {/* Remote Instances */}
             <Card className="pf-v6-u-mb-md">
