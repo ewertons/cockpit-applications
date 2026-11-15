@@ -21,6 +21,7 @@ import {
     enableJobSchedule, disableJobSchedule, getTimerStatus
 } from './restic.js';
 import { useBackups } from './backup-context.jsx';
+import { validateAbsolutePath, validateRepository } from './command-arguments.js';
 
 const _ = cockpit.gettext;
 
@@ -317,13 +318,17 @@ function JobDialog({ job, destinations, onSave, onClose }: JobDialogProps) {
     const [keepMonthly, setKeepMonthly] = useState(String(job?.retention?.keep_monthly || ''));
     const [keepYearly, setKeepYearly] = useState(String(job?.retention?.keep_yearly || ''));
 
+    const sourceList = sources.split('\n').map(s => s.trim())
+            .filter(Boolean);
+    const validationError = (repository ? validateRepository(repository) : null) ||
+        sourceList.map(validateAbsolutePath).find(Boolean) || null;
+
     const handleSubmit = () => {
         const dest = destinations.find(d => d.path === repository);
         const newJob: BackupJob = {
             id: job?.id || crypto.randomUUID(),
             name,
-            sources: sources.split('\n').map(s => s.trim())
-                    .filter(Boolean),
+            sources: sourceList,
             repository,
             password_file: job?.password_file || dest?.password_file || '',
             excludes: excludes.split('\n').map(s => s.trim())
@@ -526,9 +531,10 @@ id="job-tags" value={tags} onChange={(_ev, val) => setTags(val)}
                         </CardBody>
                     </Card>
                 </div>
+                {validationError && <Alert variant="danger" isInline title={validationError} style={{ marginTop: "1rem" }} />}
             </ModalBody>
             <ModalFooter>
-                <Button variant="primary" onClick={handleSubmit} isDisabled={!name.trim() || !sources.trim()}>
+                <Button variant="primary" onClick={handleSubmit} isDisabled={!name.trim() || !sources.trim() || !!validationError}>
                     {isEdit ? _("Save Changes") : _("Create Job")}
                 </Button>
                 <Button variant="link" onClick={onClose}>{_("Cancel")}</Button>
