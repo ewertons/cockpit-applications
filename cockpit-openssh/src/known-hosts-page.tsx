@@ -98,6 +98,8 @@ export const KnownHostsPage = () => {
         })();
     }, [loadFile, loadTimer]);
 
+    const owner = files.find(file => file.path === path)?.owner ?? null;
+
     const run = async (id: string, action: () => Promise<void>) => {
         setBusy(id);
         setError(null);
@@ -125,7 +127,7 @@ export const KnownHostsPage = () => {
     });
 
     const doRemoveHost = () => run("remove-host", async () => {
-        await removeHost(path, host);
+        await removeHost(owner, path, host);
         setConfirmRemoveHost(false);
         setInfo(cockpit.format(_("Removed $0. A backup of the previous file was left at $1.old"), host.trim(), path));
         await loadFile(path);
@@ -138,7 +140,7 @@ export const KnownHostsPage = () => {
     const doAddScanned = () => run("add-scanned", async () => {
         if (!scanned)
             return;
-        await appendEntries(path, scanned.map(entry => entry.raw));
+        await appendEntries(owner, path, scanned.map(entry => entry.raw));
         setScanned(null);
         await loadFile(path);
     });
@@ -146,13 +148,13 @@ export const KnownHostsPage = () => {
     const doRemoveEntry = () => run("remove-entry", async () => {
         if (!removingEntry)
             return;
-        await removeEntry(path, removingEntry.raw);
+        await removeEntry(owner, path, removingEntry.raw);
         setRemovingEntry(null);
         await loadFile(path);
     });
 
     const doPurge = () => run("purge", async () => {
-        const backup = await purgeAll(path);
+        const backup = await purgeAll(owner, path);
         setConfirmPurge(false);
         setInfo(cockpit.format(_("All entries removed. The previous file was copied to $0"), backup));
         await loadFile(path);
@@ -163,12 +165,12 @@ export const KnownHostsPage = () => {
     });
 
     const doSaveRaw = () => run("save-raw", async () => {
-        await writeKnownHosts(path, raw, content);
+        await writeKnownHosts(owner, path, raw, content);
         await loadFile(path);
     });
 
     const doDeleteBackup = () => run("delete-backup", async () => {
-        await deleteStaleBackup(path);
+        await deleteStaleBackup(owner, path);
         setStaleBackup(false);
     });
 

@@ -8,6 +8,7 @@ import cockpit from 'cockpit';
 
 import { SystemUser } from './authorized-keys.js';
 import reportScript from './known-hosts-report.py';
+import { asOwner, modifyFile } from './user-files.js';
 
 const _ = cockpit.gettext;
 
@@ -189,46 +190,36 @@ export function readKnownHosts(path: string): Promise<string> {
     return readQuiet(path);
 }
 
-export async function writeKnownHosts(path: string, content: string, expected: string): Promise<void> {
-    const handle = cockpit.file(path, { superuser: "require" });
-    try {
-        await handle.modify(current => {
-            if ((current || "") !== expected)
-                throw new Error(_("The file changed on disk since it was loaded. Reload and try again."));
-            return content;
-        });
-    } finally {
-        handle.close();
-    }
+/**
+ * The write functions take the file's owner (KnownHostsFile.owner): user files
+ * are edited as that user, the system file as root.
+ */
+export async function writeKnownHosts(
+    owner: string | null, path: string, content: string, expected: string
+): Promise<void> {
+    await modifyFile(owner, path, current => {
+        if (current !== expected)
+            throw new Error(_("The file changed on disk since it was loaded. Reload and try again."));
+        return content;
+    });
 }
 
-export async function removeEntry(path: string, raw: string): Promise<void> {
-    const handle = cockpit.file(path, { superuser: "require" });
-    try {
-        await handle.modify(current => {
-            const lines = (current || "").split("\n");
-            const kept = lines.filter(line => line.trim() !== raw.trim());
-            if (kept.length === lines.length)
-                throw new Error(_("That entry is no longer in the file."));
-            return kept.join("\n").replace(/\n{2,}$/, "\n");
-        });
-    } finally {
-        handle.close();
-    }
+export async function removeEntry(owner: string | null, path: string, raw: string): Promise<void> {
+    await modifyFile(owner, path, current => {
+        const lines = current.split("\n");
+        const kept = lines.filter(line => line.trim() !== raw.trim());
+        if (kept.length === lines.length)
+            throw new Error(_("That entry is no longer in the file."));
+        return kept.join("\n").replace(/\n{2,}$/, "\n");
+    });
 }
 
-export async function appendEntries(path: string, lines: string[]): Promise<void> {
-    const handle = cockpit.file(path, { superuser: "require" });
-    try {
-        await handle.modify(current => {
-            const content = current || "";
-            const prefix = content && !content.endsWith("\n") ? content + "\n" : content;
-            return prefix + lines.map(l => l.trim()).filter(Boolean)
-                    .join("\n") + "\n";
-        });
-    } finally {
-        handle.close();
-    }
+export async function appendEntries(owner: string | null, path: string, lines: string[]): Promise<void> {
+    await modifyFile(owner, path, current => {
+        const prefix = current && !current.endsWith("\n") ? current + "\n" : current;
+        return prefix + lines.map(l => l.trim()).filter(Boolean)
+                .join("\n") + "\n";
+    });
 }
 
 /** ssh-keygen -F reports a match even for hashed entries. */
@@ -244,9 +235,10 @@ export async function findHost(path: string, host: string): Promise<KnownHostEnt
     }
 }
 
-export async function removeHost(path: string, host: string): Promise<void> {
+export async function removeHost(owner: string | null, path: string, host: string): Promise<void> {
     const target = assertSafeHost(host);
-    await cockpit.spawn(["ssh-keygen", "-R", target, "-f", path], { superuser: "require", err: "message" });
+    await cockpit.spawn(asOwner(owner, ["ssh-keygen", "-R", target, "-f", path]),
+                        { superuser: "require", err: "message" });
 }
 
 /** ssh-keygen -R and -H leave a .old file holding everything just removed. */
@@ -259,20 +251,15 @@ export async function hasStaleBackup(path: string): Promise<boolean> {
     }
 }
 
-export async function deleteStaleBackup(path: string): Promise<void> {
-    await cockpit.spawn(["rm", "-f", `${path}.old`], { superuser: "require", err: "message" });
+export async function deleteStaleBackup(owner: string | null, path: string): Promise<void> {
+    await cockpit.spawn(asOwner(owner, ["rm", "-f", "--", `${path}.old`]), { superuser: "require", err: "message" });
 }
 
-export async function purgeAll(path: string): Promise<string> {
+export async function purgeAll(owner: string | null, path: string): Promise<string> {
     const backup = `${path}.cockpit-bak`;
-    await cockpit.spawn(["/bin/sh", "-c", 'cp -a "$1" "$2"', "sh", path, backup],
+    await cockpit.spawn(asOwner(owner, ["cp", owner ? "-p" : "-a", "--", path, backup]),
                         { superuser: "require", err: "message" });
-    const handle = cockpit.file(path, { superuser: "require" });
-    try {
-        await handle.replace("");
-    } finally {
-        handle.close();
-    }
+    await modifyFile(owner, path, () => "");
     return backup;
 }
 

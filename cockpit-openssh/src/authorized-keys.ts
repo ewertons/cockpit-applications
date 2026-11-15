@@ -7,6 +7,7 @@
 import cockpit from 'cockpit';
 
 import { EffectiveConfig, effectiveValue } from './openssh.js';
+import { asOwner, modifyFile } from './user-files.js';
 
 const _ = cockpit.gettext;
 
@@ -261,24 +262,37 @@ export async function userHasAuthorizedKey(user: SystemUser, effective: Effectiv
     return (await readKeys(authorizedKeysPathFor(user, effective))).length > 0;
 }
 
-async function ensureDirectory(user: SystemUser, path: string): Promise<void> {
+/**
+ * Files under a non-root user's home are edited as that user, so root never
+ * follows links there; anything else (e.g. /etc/ssh/keys/%u) stays root's.
+ */
+function editingOwner(user: SystemUser, path: string): string | null {
+    const home = user.home.replace(/\/+$/, "");
+    return user.uid !== 0 && home && path.startsWith(`${home}/`) ? user.name : null;
+}
+
+async function ensureDirectory(user: SystemUser, owner: string | null, path: string): Promise<void> {
     const dir = path.slice(0, path.lastIndexOf("/"));
     if (!dir)
         return;
-    await cockpit.spawn(["install", "-d", "-m", "0700", "-o", String(user.uid), "-g", String(user.gid), dir],
-                        { superuser: "require", err: "message" });
+    const install = owner
+        ? asOwner(owner, ["install", "-d", "-m", "0700", "--", dir])
+        : ["install", "-d", "-m", "0700", "-o", String(user.uid), "-g", String(user.gid), "--", dir];
+    await cockpit.spawn(install, { superuser: "require", err: "message" });
     try {
         await cockpit.spawn(["restorecon", "-R", "-F", dir], { superuser: "require", err: "ignore" });
     } catch { /* no SELinux here */ }
 }
 
 /**
- * cockpit.file() creates the file as root, so StrictModes would reject it until
- * the owner and mode are corrected.
+ * A root-written file needs its owner and mode corrected for StrictModes; a file
+ * written as its owner already has both.
  */
-async function fixPermissions(user: SystemUser, path: string): Promise<void> {
-    await cockpit.spawn(["chmod", "600", path], { superuser: "require", err: "message" });
-    await cockpit.spawn(["chown", `${user.uid}:${user.gid}`, path], { superuser: "require", err: "message" });
+async function fixPermissions(user: SystemUser, owner: string | null, path: string): Promise<void> {
+    if (!owner) {
+        await cockpit.spawn(["chmod", "600", path], { superuser: "require", err: "message" });
+        await cockpit.spawn(["chown", `${user.uid}:${user.gid}`, path], { superuser: "require", err: "message" });
+    }
     try {
         await cockpit.spawn(["restorecon", "-F", path], { superuser: "require", err: "ignore" });
     } catch { /* no SELinux here */ }
@@ -289,39 +303,30 @@ export async function addKey(user: SystemUser, path: string, line: string): Prom
     if (!parsed)
         throw new Error(_("That does not look like an SSH public key."));
 
-    await ensureDirectory(user, path);
+    const owner = editingOwner(user, path);
+    await ensureDirectory(user, owner, path);
 
-    const handle = cockpit.file(path, { superuser: "require" });
-    try {
-        await handle.modify(current => {
-            const content = current || "";
-            if (parseAuthorizedKeys(content).some(key => sameKey(key, parsed)))
-                throw new Error(_("That key is already authorized for this account."));
-            const prefix = content && !content.endsWith("\n") ? content + "\n" : content;
-            return prefix + parsed.raw.trim() + "\n";
-        });
-    } finally {
-        handle.close();
-    }
+    await modifyFile(owner, path, content => {
+        if (parseAuthorizedKeys(content).some(key => sameKey(key, parsed)))
+            throw new Error(_("That key is already authorized for this account."));
+        const prefix = content && !content.endsWith("\n") ? content + "\n" : content;
+        return prefix + parsed.raw.trim() + "\n";
+    });
 
-    await fixPermissions(user, path);
+    await fixPermissions(user, owner, path);
 }
 
 export async function removeKey(user: SystemUser, path: string, raw: string): Promise<void> {
-    const handle = cockpit.file(path, { superuser: "require" });
-    try {
-        await handle.modify(current => {
-            const lines = (current || "").split("\n");
-            const kept = lines.filter(line => line.trim() !== raw.trim());
-            if (kept.length === lines.length)
-                throw new Error(_("That key is no longer in the file."));
-            return kept.join("\n").replace(/\n{2,}$/, "\n");
-        });
-    } finally {
-        handle.close();
-    }
+    const owner = editingOwner(user, path);
+    await modifyFile(owner, path, current => {
+        const lines = current.split("\n");
+        const kept = lines.filter(line => line.trim() !== raw.trim());
+        if (kept.length === lines.length)
+            throw new Error(_("That key is no longer in the file."));
+        return kept.join("\n").replace(/\n{2,}$/, "\n");
+    });
 
-    await fixPermissions(user, path);
+    await fixPermissions(user, owner, path);
 }
 
 // --- Key generation ------------------------------------------------------
