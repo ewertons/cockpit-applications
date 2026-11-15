@@ -50,8 +50,7 @@ async function lsSnapshot(
 ): Promise<FileEntry[]> {
     for (const dest of destinations) {
         try {
-            const cmd = [
-                "env",
+            const environ = [
                 `RESTIC_REPOSITORY=${dest.path}`,
                 `RESTIC_PASSWORD_FILE=${dest.password_file}`,
             ];
@@ -65,12 +64,12 @@ async function lsSnapshot(
                             resticArgs.push("-o", `sftp.command=ssh ${host} -i ${val} -o StrictHostKeyChecking=accept-new -s sftp`);
                         }
                     } else {
-                        cmd.push(`${key}=${val}`);
+                        environ.push(`${key}=${val}`);
                     }
                 }
             }
-            cmd.push("restic", ...resticArgs, "ls", snapshotId, path, "--json");
-            const output = await cockpit.spawn(cmd, { superuser: "try", err: "message" });
+            const output = await cockpit.spawn(["restic", ...resticArgs, "ls", snapshotId, path, "--json"],
+                                               { superuser: "try", err: "message", environ });
             const entries: FileEntry[] = [];
             for (const line of output.trim().split('\n')) {
                 if (!line) continue;

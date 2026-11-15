@@ -90,7 +90,7 @@ install: $(DIST_TEST)
 	mkdir -p $(DESTDIR)$(PREFIX)/share/cockpit/$(PACKAGE_NAME)
 	cp -r dist/* $(DESTDIR)$(PREFIX)/share/cockpit/$(PACKAGE_NAME)
 	mkdir -p $(DESTDIR)/etc/cockpit-backup/passwords
-	chmod 700 $(DESTDIR)/etc/cockpit-backup/passwords
+	chmod 700 $(DESTDIR)/etc/cockpit-backup $(DESTDIR)/etc/cockpit-backup/passwords
 
 devel-install: $(DIST_TEST)
 	mkdir -p ~/.local/share/cockpit

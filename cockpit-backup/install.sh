@@ -107,9 +107,8 @@ else
 
     # Create config directory
     echo "==> Setting up configuration directory..."
-    mkdir -p /etc/cockpit-backup/passwords
-    chmod 700 /etc/cockpit-backup/passwords
-    chmod 755 /etc/cockpit-backup
+    # destinations.json and env/ hold repository credentials: root only.
+    install -d -m 700 /etc/cockpit-backup /etc/cockpit-backup/passwords
 
     # Initialize empty config files if they don't exist
     if [[ ! -f /etc/cockpit-backup/jobs.json ]]; then
@@ -118,6 +117,7 @@ else
     if [[ ! -f /etc/cockpit-backup/destinations.json ]]; then
         echo '[]' > /etc/cockpit-backup/destinations.json
     fi
+    chmod 600 /etc/cockpit-backup/jobs.json /etc/cockpit-backup/destinations.json
 fi
 
 echo "==> Done. Reload Cockpit in your browser to see 'Backup' in the menu."
