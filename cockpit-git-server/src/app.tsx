@@ -23,9 +23,20 @@ interface LocationState {
     commitHash?: string;
 }
 
+// Repositories are directories directly under /srv/git; see repositories-page.tsx.
+const isRepoName = (name: string) => /^[a-zA-Z0-9._-]+$/.test(name) && name !== "." && name !== "..";
+
+// Anything else in ?commit= is dropped rather than passed to git.
+const commitOption = (value: string | string[] | undefined) =>
+    (typeof value === "string" && /^[0-9a-f]{4,64}$/.test(value) ? value : "");
+
 function parseLocation(): LocationState {
     const loc = cockpit.location;
     const path = loc.path;
+
+    if (path.length >= 2 && path[0] === "repo" && !isRepoName(decodeURIComponent(path[1]))) {
+        return { page: "repositories" };
+    }
 
     if (path.length >= 3 && path[0] === "repo" && path[1] === "browse") {
         return {
@@ -33,7 +44,7 @@ function parseLocation(): LocationState {
             repo: decodeURIComponent(path[1]),
             ref: loc.options.ref || "HEAD",
             path: loc.options.path || "",
-            commitHash: loc.options.commit || "",
+            commitHash: commitOption(loc.options.commit),
         };
     }
     if (path.length >= 2 && path[0] === "repo") {
@@ -43,7 +54,7 @@ function parseLocation(): LocationState {
             repo: decodeURIComponent(path[1]),
             ref: loc.options.ref || "HEAD",
             path: loc.options.path || "",
-            commitHash: loc.options.commit || "",
+            commitHash: commitOption(loc.options.commit),
         };
     }
     if (path.length >= 1 && path[0] === "services") {
