@@ -1,0 +1,9 @@
+dist/
+node_modules/
+pkg/lib
+test/common
+tools/node-modules
+metafile.json
+runtime-npm-modules.txt
+*.rpm
+*.tar.xz
