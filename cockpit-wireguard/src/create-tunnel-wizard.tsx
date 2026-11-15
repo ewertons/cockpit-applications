@@ -5,7 +5,6 @@ import { ClipboardCopy } from "@patternfly/react-core/dist/esm/components/Clipbo
 import { FormGroup } from "@patternfly/react-core/dist/esm/components/Form/index.js";
 import { HelperText, HelperTextItem } from "@patternfly/react-core/dist/esm/components/HelperText/index.js";
 import { Spinner } from "@patternfly/react-core/dist/esm/components/Spinner/index.js";
-import { Switch } from "@patternfly/react-core/dist/esm/components/Switch/index.js";
 import { TextInput } from "@patternfly/react-core/dist/esm/components/TextInput/index.js";
 
 import cockpit from 'cockpit';
@@ -53,7 +52,6 @@ export function CreateTunnelWizard({ existingNames, onClose, onSaved }: CreateTu
     const [listenPort, setListenPort] = useState("51820");
     const [publicEndpoint, setPublicEndpoint] = useState(browserEndpointHost);
     const [clientDns, setClientDns] = useState("1.1.1.1");
-    const [nat, setNat] = useState(true);
 
     const [keys, setKeys] = useState<{ privateKey: string; publicKey: string } | null>(null);
     const [generating, setGenerating] = useState(true);
@@ -124,7 +122,6 @@ export function CreateTunnelWizard({ existingNames, onClose, onSaved }: CreateTu
             clientDns: clientDns.trim() || undefined,
             peers: [],
             extraInterfaceLines: [],
-            firewallManagement: nat ? "managed" : "unmanaged",
         };
 
         await saveInterface(iface);
@@ -242,14 +239,10 @@ export function CreateTunnelWizard({ existingNames, onClose, onSaved }: CreateTu
                         </HelperText>
                     </FormGroup>
 
-                    <FormGroup fieldId="wg-nat" label={_("Routing")}>
-                        <Switch
-                            id="wg-nat" label={_("Route all client traffic through this server (full tunnel + NAT)")}
-                            isChecked={nat} onChange={(_ev, checked) => setNat(checked)}
-                        />
-                        <HelperText>
+                    <FormGroup fieldId="wg-routing" label={_("Routing")}>
+                        <HelperText id="wg-routing">
                             <HelperTextItem>
-                                {_("Enables IP forwarding and masquerading so clients reach the internet or LAN through this server. Full-tunnel clients may reach anything; split-tunnel clients only the VPN subnet and their LAN access entries. Turn off to not forward client traffic at all.")}
+                                {_("This app does not set up IP forwarding or forwarding rules. For clients to reach the internet or LAN through this server, enable IP forwarding and allow (and masquerade) their traffic in this server's firewall.")}
                             </HelperTextItem>
                         </HelperText>
                     </FormGroup>

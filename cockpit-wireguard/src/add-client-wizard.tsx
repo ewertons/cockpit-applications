@@ -9,12 +9,12 @@ import cockpit from 'cockpit';
 
 import { StepWizard, WizardStepDef } from './stepper.jsx';
 import { ClientConfigView, sanitizeFileName } from './client-config-view.jsx';
-import { LanAccessField } from './lan-access-field.jsx';
+import { ExtraRoutesField } from './extra-routes-field.jsx';
 import {
     WgInterface, WgPeer, genKeypair, genPresharedKey, pubkeyFromPrivate,
     saveInterface, applyLive, nextClientIp, buildClientConfig, resolveClientEndpoint,
-    browserEndpointHost, endpointHost, isLoopbackHost, parseLanAccessList,
-    clientAllowedIpsFor, convertLegacyFirewall, isClientAddressInUse,
+    browserEndpointHost, endpointHost, isLoopbackHost, parseExtraRouteList,
+    clientAllowedIpsFor, isClientAddressInUse,
 } from './wireguard.js';
 
 const _ = cockpit.gettext;
@@ -30,7 +30,7 @@ export function AddClientWizard({ iface, onClose, onSaved }: AddClientWizardProp
     const [clientIp, setClientIp] = useState(() => nextClientIp(iface) || "");
     const [endpointOverride, setEndpointOverride] = useState("");
     const [fullTunnel, setFullTunnel] = useState(true);
-    const [lanAccessText, setLanAccessText] = useState("");
+    const [extraRoutesText, setExtraRoutesText] = useState("");
     const [usePsk, setUsePsk] = useState(true);
     const [clientConfig, setClientConfig] = useState<string | null>(null);
     const [warning, setWarning] = useState<string | null>(null);
@@ -47,8 +47,8 @@ export function AddClientWizard({ iface, onClose, onSaved }: AddClientWizardProp
         : !endpoint
             ? _("No public endpoint is set for this tunnel. Enter the public host or IP clients use to reach this server (add :port if your router forwards another port), or set it in the tunnel settings.")
             : null;
-    const lanAccess = useMemo(() => parseLanAccessList(lanAccessText), [lanAccessText]);
-    const lanAccessErrors = fullTunnel ? [] : lanAccess.errors;
+    const extraRoutes = useMemo(() => parseExtraRouteList(extraRoutesText), [extraRoutesText]);
+    const extraRoutesErrors = fullTunnel ? [] : extraRoutes.errors;
 
     const ipFormatValid = /^\d{1,3}(\.\d{1,3}){3}$/.test(clientIp.trim()) &&
         clientIp.trim().split(".")
@@ -69,7 +69,7 @@ export function AddClientWizard({ iface, onClose, onSaved }: AddClientWizardProp
 
         if (!endpoint)
             throw new Error(endpointError || _("No endpoint"));
-        const allowedIps = clientAllowedIpsFor(iface, fullTunnel, lanAccess.entries);
+        const allowedIps = clientAllowedIpsFor(iface, fullTunnel, extraRoutes.routes);
 
         const config = buildClientConfig({
             clientPrivateKey: kp.privateKey,
@@ -91,16 +91,14 @@ export function AddClientWizard({ iface, onClose, onSaved }: AddClientWizardProp
             presharedKey: psk,
             allowedIps: [`${clientIp.trim()}/32`],
             clientAllowedIps: allowedIps,
-            lanAccess: fullTunnel ? undefined : lanAccess.entries,
             clientEndpoint: overrideText || undefined,
             extraLines: [],
         };
-        const convertedIface = convertLegacyFirewall(iface);
-        const updatedIface: WgInterface = { ...convertedIface, peers: [...convertedIface.peers, peer] };
+        const updatedIface: WgInterface = { ...iface, peers: [...iface.peers, peer] };
         await saveInterface(updatedIface);
         if (iface.up) {
             try {
-                await applyLive(updatedIface);
+                await applyLive(iface.name);
             } catch (e: unknown) {
                 setWarning(cockpit.format(_("The client was saved, but the running tunnel could not be updated ($0). Restart the tunnel to apply it."),
                                           e instanceof Error ? e.message : String(e)));
@@ -116,7 +114,7 @@ export function AddClientWizard({ iface, onClose, onSaved }: AddClientWizardProp
         {
             id: "details",
             name: _("Client"),
-            canContinue: nameValid && ipValid && !endpointError && lanAccessErrors.length === 0,
+            canContinue: nameValid && ipValid && !endpointError && extraRoutesErrors.length === 0,
             nextLabel: _("Create client"),
             onNext: createClient,
             content: (
@@ -167,15 +165,15 @@ export function AddClientWizard({ iface, onClose, onSaved }: AddClientWizardProp
                         />
                         <HelperText>
                             <HelperTextItem>
-                                {_("Off means the client only reaches the VPN subnet and its LAN access entries (split tunnel).")}
+                                {_("Off means the client only sends traffic for the VPN subnet and its extra routes through the VPN (split tunnel). Full tunnel needs forwarding and NAT on this server, configured in its firewall.")}
                             </HelperTextItem>
                         </HelperText>
                     </FormGroup>
 
                     {!fullTunnel && (
-                        <LanAccessField
-                            id="wg-client-lan-access" value={lanAccessText} onChange={setLanAccessText}
-                            errors={lanAccessErrors} firewallManagement={iface.firewallManagement}
+                        <ExtraRoutesField
+                            id="wg-client-extra-routes" value={extraRoutesText} onChange={setExtraRoutesText}
+                            errors={extraRoutesErrors}
                         />
                     )}
 

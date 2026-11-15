@@ -283,7 +283,7 @@ function EditTunnelDialog({ iface, onClose, onSaved }: EditTunnelDialogProps) {
             };
             await saveInterface(updated);
             if (iface.up) {
-                try { await applyLive(updated) } catch { /* applied on next restart */ }
+                try { await applyLive(iface.name) } catch { /* applied on next restart */ }
             }
             onSaved();
             onClose();
