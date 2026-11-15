@@ -16,7 +16,7 @@ import {
     WgInterface, WgPeer, buildClientConfig, genKeypair, genPresharedKey,
     saveInterface, applyLive, resolveClientEndpoint, browserEndpointHost,
     endpointHost, isLoopbackHost, parseLanAccessList, clientAllowedIpsFor,
-    convertLegacyFirewall, isFullTunnelPeer,
+    convertLegacyFirewall, isFullTunnelPeer, isClientAddressInUse,
 } from './wireguard.js';
 
 const _ = cockpit.gettext;
@@ -62,9 +62,12 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
             ? _("No public endpoint is set for this tunnel. Enter the public host or IP clients use to reach this server (add :port if your router forwards another port), or set it in the tunnel settings.")
             : null;
 
-    const ipValid = /^\d{1,3}(\.\d{1,3}){3}$/.test(clientIp.trim()) &&
+    const ipFormatValid = /^\d{1,3}(\.\d{1,3}){3}$/.test(clientIp.trim()) &&
         clientIp.trim().split(".")
                 .every(o => parseInt(o, 10) <= 255);
+    // peer.publicKey is the key this peer has in iface, even after a key change.
+    const ipInUse = ipFormatValid && isClientAddressInUse(iface, clientIp, peer.publicKey);
+    const ipValid = ipFormatValid && !ipInUse;
     const nameValid = name.trim().length > 0;
     const lanAccess = useMemo(() => parseLanAccessList(lanAccessText), [lanAccessText]);
     const lanAccessErrors = fullTunnel ? [] : lanAccess.errors;
@@ -174,6 +177,11 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
                             validated={ipValid ? "default" : "error"}
                             placeholder="10.8.0.2"
                         />
+                        {ipInUse && (
+                            <HelperText>
+                                <HelperTextItem variant="error">{_("Another client already uses this address.")}</HelperTextItem>
+                            </HelperText>
+                        )}
                     </FormGroup>
 
                     <FormGroup label={_("Endpoint")} fieldId="edit-client-endpoint">

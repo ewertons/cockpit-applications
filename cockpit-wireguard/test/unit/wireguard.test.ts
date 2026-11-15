@@ -6,6 +6,7 @@ import {
     accessChainRuleSpecs,
     clientAllowedIpsFor,
     convertLegacyFirewall,
+    isClientAddressInUse,
     isLoopbackHost,
     legacyNatRules,
     liveFirewallScript,
@@ -134,10 +135,26 @@ function runHook(tables: Tables, hook: string, interfaceName: string): void {
 // Runs liveFirewallScript output for the shell subset it uses.
 function runLiveScript(tables: Tables, script: string, interfaceName: string): void {
     const lines = script.trimEnd().split("\n");
+    let legacyRunning = false;
+    let skipping = false;
     for (let index = 0; index < lines.length; index++) {
         const line = lines[index].replace(/"\$egress"/g, "eth0");
-        if (line === "set -e" || line.startsWith("sysctl ") || line.startsWith("egress="))
+        if (line === "fi") {
+            skipping = false;
             continue;
+        }
+        if (skipping || line === "set -e" || line.startsWith("sysctl ") || line.startsWith("egress=") ||
+            line === "legacy_running=false")
+            continue;
+        const legacyCheck = line.match(/^if iptables (.*) 2>\/dev\/null; then legacy_running=true; fi$/);
+        if (legacyCheck) {
+            legacyRunning = runIptables(tables, legacyCheck[1]);
+            continue;
+        }
+        if (line === "if $legacy_running; then") {
+            skipping = !legacyRunning;
+            continue;
+        }
         if (line === "iptables-restore --noflush <<'EOF'") {
             const end = lines.indexOf("EOF", index);
             const body = lines.slice(index + 1, end);
@@ -323,7 +340,7 @@ describe("hub firewall rules", () => {
             runHook(tables, line, "wg0");
 
         assert.deepEqual(tables.filter.FORWARD, ["-i wg0 -j wg-access-wg0", "-i eth0 -j ACCEPT", "-o wg0 -j ACCEPT"]);
-        assert.deepEqual(tables.nat.POSTROUTING, ["-o eth0 -j MASQUERADE"]);
+        assert.deepEqual(tables.nat.POSTROUTING, ["-o eth0 -m comment --comment wg-access-wg0 -j MASQUERADE"]);
         assert.deepEqual(tables.filter["wg-access-wg0"], accessChainRuleSpecs(managed).flat());
 
         for (const line of lines.filter(line => line.startsWith("PostDown = ")))
@@ -359,6 +376,34 @@ describe("hub firewall rules", () => {
         assert.equal(chainVerdict(rules, { ...lanPacket, source: "10.99.0.3", destination: "10.99.0.9" }), "ACCEPT");
     });
 
+    test("each tunnel owns its masquerade rule", () => {
+        const tables: Tables = { filter: { FORWARD: [] }, nat: { POSTROUTING: [] } };
+        const lines = managedFirewallLines(managed);
+        for (const interfaceName of ["wg0", "wg1"])
+            for (const line of lines.filter(line => line.startsWith("PostUp = ")))
+                runHook(tables, line, interfaceName);
+        for (const line of lines.filter(line => line.startsWith("PostDown = ")))
+            runHook(tables, line, "wg0");
+        assert.deepEqual(tables.nat.POSTROUTING, ["-o eth0 -m comment --comment wg-access-wg1 -j MASQUERADE"]);
+    });
+
+    test("a source listed on several peers follows the last one, as in WireGuard", () => {
+        const text = hubConfig([], ["# ClientLanAccess = none"]).replace("AllowedIPs = 10.99.0.2/32", "AllowedIPs = 10.99.0.3/32");
+        const rules = accessChainRuleSpecs(parseConfig("wg0", text)).flat();
+        assert.ok(!rules.includes("-s 10.99.0.3/32 -j ACCEPT"), rules.join(" | "));
+        assert.equal(chainVerdict(rules, { source: "10.99.0.3", destination: "192.168.1.50", protocol: "tcp", port: 80 }), "DROP");
+    });
+
+    test("client addresses already used by another peer are detected", () => {
+        const iface = parseConfig("wg0", hubConfig([]));
+        assert.ok(isClientAddressInUse(iface, "10.99.0.3"));
+        assert.ok(isClientAddressInUse(iface, " 10.99.0.3/32 "));
+        assert.ok(!isClientAddressInUse(iface, "10.99.0.3", "LAPTOP="));
+        assert.ok(!isClientAddressInUse(iface, "10.99.0.4"));
+        const network = parseConfig("wg0", hubConfig([]).replace("AllowedIPs = 10.99.0.2/32", "AllowedIPs = 10.99.0.18/28"));
+        assert.ok(isClientAddressInUse(network, "10.99.0.16/28"));
+    });
+
     test("live update reconciles any installed state and is idempotent", () => {
         const script = liveFirewallScript(managed);
         assert.ok(!script.includes("%i"));
@@ -381,7 +426,7 @@ describe("hub firewall rules", () => {
             runLiveScript(tables, script, "wg0");
             assert.deepEqual(tables.filter.FORWARD, ["-i wg0 -j wg-access-wg0", "-i eth0 -j ACCEPT", "-o wg0 -j ACCEPT"]);
             assert.deepEqual(tables.filter["wg-access-wg0"], expectedChain);
-            assert.deepEqual(tables.nat.POSTROUTING, ["-o eth0 -j MASQUERADE"]);
+            assert.deepEqual(tables.nat.POSTROUTING, ["-o eth0 -m comment --comment wg-access-wg0 -j MASQUERADE"]);
             for (const line of managedFirewallLines(managed).filter(line => line.startsWith("PostDown = ")))
                 runHook(tables, line, "wg0");
             assert.deepEqual(tables, { filter: { FORWARD: ["-i eth0 -j ACCEPT"] }, nat: { POSTROUTING: [] } });

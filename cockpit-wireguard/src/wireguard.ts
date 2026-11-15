@@ -420,6 +420,8 @@ export async function openFirewallPort(port: number): Promise<void> {
 // and %i (the interface name) expand at interface up/down time.
 const EGRESS_DEVICE = "$(ip -4 route list default | awk '{print $5; exit}')";
 const ACCESS_CHAIN = "wg-access-%i";
+// Tagged per tunnel so tunnels sharing an egress device never delete each other's rule.
+const MANAGED_MASQUERADE_RULE = `POSTROUTING -o ${EGRESS_DEVICE} -m comment --comment ${ACCESS_CHAIN} -j MASQUERADE`;
 
 /** Allow-all forwarding and masquerading written by earlier app versions. */
 export function legacyNatRules(): string[] {
@@ -434,14 +436,14 @@ const MANAGED_FORWARDING_LINE = `PostUp = sysctl -q -w net.ipv4.ip_forward=1`;
 const MANAGED_CREATE_CHAIN_LINE = `PostUp = iptables -N ${ACCESS_CHAIN} 2>/dev/null || iptables -F ${ACCESS_CHAIN}`;
 // The jump goes first in FORWARD so no other tunnel's "-o ACCEPT" (or any
 // earlier ACCEPT) is reached before this tunnel's access chain.
-const MANAGED_ATTACH_LINE = `PostUp = iptables -I FORWARD 1 -i %i -j ${ACCESS_CHAIN}; iptables -A FORWARD -o %i -j ACCEPT; iptables -t nat -A POSTROUTING -o ${EGRESS_DEVICE} -j MASQUERADE`;
+const MANAGED_ATTACH_LINE = `PostUp = iptables -I FORWARD 1 -i %i -j ${ACCESS_CHAIN}; iptables -A FORWARD -o %i -j ACCEPT; iptables -t nat -A ${MANAGED_MASQUERADE_RULE}`;
 // Every step tolerates failure so a partial state is still fully removed.
 const MANAGED_POST_DOWN_LINE = "PostDown = " + [
     `iptables -D FORWARD -i %i -j ${ACCESS_CHAIN}`,
     `iptables -F ${ACCESS_CHAIN}`,
     `iptables -X ${ACCESS_CHAIN}`,
     `iptables -D FORWARD -o %i -j ACCEPT`,
-    `iptables -t nat -D POSTROUTING -o ${EGRESS_DEVICE} -j MASQUERADE`,
+    `iptables -t nat -D ${MANAGED_MASQUERADE_RULE}`,
 ].map(command => `${command} || true`).join("; ");
 
 function isFirewallHookLine(line: string): boolean {
@@ -501,13 +503,13 @@ export function hasUnrestrictedForwarding(peer: WgPeer): boolean {
  */
 export function accessChainRuleSpecs(iface: WgInterface): string[][] {
     const vpnSubnet = serverSubnetCidr(iface);
-    const sourceGroups: { prefix: number; specs: string[] }[] = [];
+    const sourceGroups: { source: string; prefix: number; specs: string[] }[] = [];
     for (const peer of iface.peers) {
         const sources = peer.allowedIps.map(normalizeIpv4Cidr).filter((cidr): cidr is string => cidr !== null);
         for (const source of sources) {
             const prefix = Number(source.split("/")[1]);
             if (hasUnrestrictedForwarding(peer)) {
-                sourceGroups.push({ prefix, specs: [`-s ${source} -j ACCEPT`] });
+                sourceGroups.push({ source, prefix, specs: [`-s ${source} -j ACCEPT`] });
                 continue;
             }
             const specs = [`-s ${source} -d ${vpnSubnet} -j ACCEPT`];
@@ -523,14 +525,17 @@ export function accessChainRuleSpecs(iface: WgInterface): string[][] {
                     specs.push(`-s ${source} -d ${entry.destination} -p ${protocol} --dport ${entry.port} -j ACCEPT`);
             }
             specs.push(`-s ${source} -j DROP`);
-            sourceGroups.push({ prefix, specs });
+            sourceGroups.push({ source, prefix, specs });
         }
     }
+    // WireGuard gives an AllowedIPs entry listed on several peers to the last one.
+    const ownedGroups = sourceGroups.filter((group, index) =>
+        !sourceGroups.slice(index + 1).some(later => later.source === group.source));
     // Array.prototype.sort is stable, so equal prefixes keep the peer order.
-    sourceGroups.sort((first, second) => second.prefix - first.prefix);
+    ownedGroups.sort((first, second) => second.prefix - first.prefix);
     return [
         ["-m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"],
-        ...sourceGroups.map(group => group.specs),
+        ...ownedGroups.map(group => group.specs),
         ["-j DROP"],
     ];
 }
@@ -551,15 +556,19 @@ export function managedFirewallLines(iface: WgInterface): string[] {
 /**
  * Idempotent bash script that brings a running tunnel's firewall in line with
  * its managed config, whatever is installed now: atomically replaces the
- * access chain, adds missing attach/masquerade rules and removes the legacy
- * allow-all rule once the access chain is attached.
+ * access chain and adds missing attach/masquerade rules. If the legacy
+ * allow-all rules are running, they are removed once the chain is attached.
  */
 export function liveFirewallScript(iface: WgInterface): string {
     const name = iface.name;
     const chain = ACCESS_CHAIN.replace(/%i/g, name);
+    const masquerade = MANAGED_MASQUERADE_RULE.replace(/%i/g, name).replace(EGRESS_DEVICE, '"$egress"');
     return [
         "set -e",
         "sysctl -q -w net.ipv4.ip_forward=1",
+        `egress=${EGRESS_DEVICE}`,
+        "legacy_running=false",
+        `if iptables -C FORWARD -i ${name} -j ACCEPT 2>/dev/null; then legacy_running=true; fi`,
         "iptables-restore --noflush <<'EOF'",
         "*filter",
         `:${chain} - [0:0]`,
@@ -569,10 +578,20 @@ export function liveFirewallScript(iface: WgInterface): string {
         "EOF",
         `iptables -C FORWARD -i ${name} -j ${chain} 2>/dev/null || iptables -I FORWARD 1 -i ${name} -j ${chain}`,
         `iptables -C FORWARD -o ${name} -j ACCEPT 2>/dev/null || iptables -A FORWARD -o ${name} -j ACCEPT`,
-        `egress=${EGRESS_DEVICE}`,
-        `iptables -t nat -C POSTROUTING -o "$egress" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o "$egress" -j MASQUERADE`,
+        `iptables -t nat -C ${masquerade} 2>/dev/null || iptables -t nat -A ${masquerade}`,
+        // The legacy PostUp added one untagged masquerade rule per tunnel.
+        "if $legacy_running; then",
         `while iptables -D FORWARD -i ${name} -j ACCEPT 2>/dev/null; do :; done`,
+        `iptables -t nat -D POSTROUTING -o "$egress" -j MASQUERADE 2>/dev/null || true`,
+        "fi",
     ].join("\n") + "\n";
+}
+
+/** True if another peer (not exceptPublicKey) already uses this client address. */
+export function isClientAddressInUse(iface: WgInterface, address: string, exceptPublicKey?: string): boolean {
+    const source = normalizeIpv4Cidr(address.trim());
+    return source !== null && iface.peers.some(peer => peer.publicKey !== exceptPublicKey &&
+        peer.allowedIps.some(allowedIp => normalizeIpv4Cidr(allowedIp) === source));
 }
 
 // --- LAN access entries ----------------------------------------------------
@@ -684,7 +703,10 @@ function normalizeIpv4Cidr(text: string): string | null {
     if (!match || isNaN(ipToInt(match[1])))
         return null;
     const prefix = match[2] === undefined ? 32 : parseInt(match[2], 10);
-    return prefix <= 32 ? `${match[1]}/${prefix}` : null;
+    if (prefix > 32)
+        return null;
+    // Host bits are cleared, as WireGuard and iptables do.
+    return `${intToIp((ipToInt(match[1]) & prefixMask(prefix)) >>> 0)}/${prefix}`;
 }
 
 function intToIp(n: number): string {

@@ -14,7 +14,7 @@ import {
     WgInterface, WgPeer, genKeypair, genPresharedKey, pubkeyFromPrivate,
     saveInterface, applyLive, nextClientIp, buildClientConfig, resolveClientEndpoint,
     browserEndpointHost, endpointHost, isLoopbackHost, parseLanAccessList,
-    clientAllowedIpsFor, convertLegacyFirewall,
+    clientAllowedIpsFor, convertLegacyFirewall, isClientAddressInUse,
 } from './wireguard.js';
 
 const _ = cockpit.gettext;
@@ -50,9 +50,11 @@ export function AddClientWizard({ iface, onClose, onSaved }: AddClientWizardProp
     const lanAccess = useMemo(() => parseLanAccessList(lanAccessText), [lanAccessText]);
     const lanAccessErrors = fullTunnel ? [] : lanAccess.errors;
 
-    const ipValid = /^\d{1,3}(\.\d{1,3}){3}$/.test(clientIp.trim()) &&
+    const ipFormatValid = /^\d{1,3}(\.\d{1,3}){3}$/.test(clientIp.trim()) &&
         clientIp.trim().split(".")
                 .every(o => parseInt(o, 10) <= 255);
+    const ipInUse = ipFormatValid && isClientAddressInUse(iface, clientIp);
+    const ipValid = ipFormatValid && !ipInUse;
     const nameValid = name.trim().length > 0;
 
     const createClient = async (): Promise<boolean> => {
@@ -134,7 +136,9 @@ export function AddClientWizard({ iface, onClose, onSaved }: AddClientWizardProp
                         />
                         <HelperText>
                             <HelperTextItem variant={clientIp && !ipValid ? "error" : "default"}>
-                                {_("Address assigned to this client inside the VPN. Prefilled with the next free address.")}
+                                {ipInUse
+                                    ? _("Another client already uses this address.")
+                                    : _("Address assigned to this client inside the VPN. Prefilled with the next free address.")}
                             </HelperTextItem>
                         </HelperText>
                     </FormGroup>
