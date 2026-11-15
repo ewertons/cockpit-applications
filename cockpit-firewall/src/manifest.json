@@ -1,0 +1,19 @@
+{
+    "requires": {
+        "cockpit": "137"
+    },
+
+    "tools": {
+        "firewall-rules": {
+            "label": "Firewall rules",
+            "path": "index.html",
+            "order": 52
+        }
+    },
+
+    "conditions": [
+        {
+            "path-exists": "/usr/sbin/nft"
+        }
+    ]
+}

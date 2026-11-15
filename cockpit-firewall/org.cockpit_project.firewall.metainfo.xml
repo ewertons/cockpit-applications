@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="addon">
+  <id>org.cockpit_project.firewall</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <name>Firewall rules</name>
+  <summary>Cockpit extension for nftables forwarding, NAT and input rules</summary>
+  <description>
+    <p>
+      A Cockpit extension that manages zones, hosts, services, forward rules,
+      NAT masquerading and input rules in dedicated nftables tables. Changes are
+      validated, previewed, applied atomically and rolled back automatically
+      unless confirmed. Other nftables tables are never modified.
+    </p>
+  </description>
+  <extends>org.cockpit_project.cockpit</extends>
+  <launchable type="cockpit-manifest">firewall</launchable>
+  <url type="homepage">https://github.com/ewertons/cockpit-applications</url>
+  <url type="bugtracker">https://github.com/ewertons/cockpit-applications/issues</url>
+  <update_contact>cockpit-devel_AT_lists.fedorahosted.org</update_contact>
+  <developer id="org.cockpit-project">
+    <name>Cockpit Project</name>
+  </developer>
+</component>

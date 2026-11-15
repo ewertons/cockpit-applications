@@ -11,6 +11,7 @@ A monorepo of [Cockpit](https://cockpit-project.org/) extensions for Linux serve
 | [cockpit-openssh](cockpit-openssh/) | Configure the OpenSSH server, authorized keys, and known hosts |
 | [cockpit-security](cockpit-security/) | Security monitoring and hardening tools |
 | [cockpit-wireguard](cockpit-wireguard/) | Manage WireGuard VPN tunnels and clients |
+| [cockpit-firewall](cockpit-firewall/) | Manage nftables forwarding, NAT and input rules with safe apply |
 
 See each application's README for installation, usage, and development instructions:
 
@@ -19,6 +20,7 @@ See each application's README for installation, usage, and development instructi
 - [cockpit-openssh/README.md](cockpit-openssh/README.md)
 - [cockpit-security/README.md](cockpit-security/README.md)
 - [cockpit-wireguard/README.md](cockpit-wireguard/README.md)
+- [cockpit-firewall/README.md](cockpit-firewall/README.md)
 
 ## License
 
