@@ -288,7 +288,7 @@ export async function scanHost(host: string, port: string): Promise<KnownHostEnt
             throw new Error(_("The port must be a number."));
         args.push("-p", port.trim());
     }
-    args.push(target);
+    args.push("--", target);
 
     // ssh-keyscan exits 0 even when the host fails, so check for output instead.
     const out = await cockpit.spawn(args, { err: "message" });
@@ -366,6 +366,7 @@ ReadWritePaths=${STATE_DIR}
 ProtectHome=read-only
 PrivateTmp=yes
 NoNewPrivileges=yes
+UMask=0077
 `;
 
 const TIMER_UNIT = `[Unit]
@@ -405,6 +406,7 @@ export function validateSchedule(schedule: string): Promise<string> {
 async function installReportAssets(): Promise<void> {
     await cockpit.spawn(["mkdir", "-p", LIBEXEC_DIR, CONFIG_DIR, STATE_DIR],
                         { superuser: "require", err: "message" });
+    await cockpit.spawn(["chmod", "0700", STATE_DIR], { superuser: "require", err: "message" });
     await writeRootFile(SCRIPT_PATH, reportScript);
     await cockpit.spawn(["chmod", "0755", SCRIPT_PATH], { superuser: "require", err: "message" });
     await writeRootFile(`${UNIT_DIR}/${REPORT_UNIT}.service`, SERVICE_UNIT);

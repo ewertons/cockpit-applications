@@ -14,6 +14,8 @@ import { OutlinedQuestionCircleIcon } from "@patternfly/react-icons/dist/esm/ico
 
 import cockpit from 'cockpit';
 
+import { isValidIpAddress } from './command-arguments.js';
+
 const _ = cockpit.gettext;
 
 interface Fail2BanJail {
@@ -165,6 +167,10 @@ export const Fail2BanPage = () => {
         if (!unbanIP) return;
         setError("");
         setSuccess("");
+        if (!isValidIpAddress(unbanIP)) {
+            setError(_("Enter a single IPv4 or IPv6 address."));
+            return;
+        }
         try {
             await cockpit.spawn(["fail2ban-client", "unban", unbanIP], { superuser: "require" });
             setSuccess(_("Unbanned: ") + unbanIP);
