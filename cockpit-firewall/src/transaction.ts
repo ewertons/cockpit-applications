@@ -32,6 +32,7 @@ export const ExitCode = {
     nothingToConfirm: 6,
     alreadyRolledBack: 7,
     persistFailed: 8,
+    otherChangePending: 9,
 } as const;
 
 /** @returns the systemd unit that loads the persisted ruleset at boot and whenever nftables.service (re)starts. */
@@ -101,6 +102,7 @@ export function rollbackScriptText(): string {
         `    echo rolled-back > "${STATE_DIRECTORY}/outcome"`,
         "else",
         `    echo rollback-failed > "${STATE_DIRECTORY}/outcome"`,
+        "    exit 1",
         "fi",
         "",
     ].join("\n");
@@ -160,7 +162,7 @@ export function applyScriptText(enableForwarding: boolean): string {
         `touch "$state_directory/armed"`,
         ...enableForwarding ? ["echo 1 > /proc/sys/net/ipv4/ip_forward"] : [],
         `if ! nft -f "$state_directory/pending.nft"; then`,
-        `    ${RUN_ROLLBACK_NOW}`,
+        `    ${RUN_ROLLBACK_NOW} || true`,
         `    systemctl stop "$rollback_unit.timer" 2>/dev/null || true`,
         `    exit ${ExitCode.applyFailed}`,
         "fi",
@@ -168,11 +170,19 @@ export function applyScriptText(enableForwarding: boolean): string {
     ].join("\n");
 }
 
+/** Rejects the request unless the pending change is the one the caller ($1) reviewed. */
+const EXPECTED_TOKEN_CHECK = [
+    `if [ "$(cat "$state_directory/token" 2>/dev/null)" != "\${1:-}" ]; then`,
+    `    echo "Another change replaced the one shown; reload the page" >&2`,
+    `    exit ${ExitCode.otherChangePending}`,
+    "fi",
+];
+
 /** Files written on confirmation; backed up first so a failed save can be undone. */
 const PERSISTED_PATHS = [PERSISTED_RULESET_PATH, SYSCTL_PATH, BOOT_UNIT_PATH];
 
 /**
- * Builds the confirm script. It persists the applied ruleset, the sysctl file
+ * Builds the confirm script ($1: token of the change the user reviewed). It persists the applied ruleset, the sysctl file
  * (as recorded by apply) and the boot unit, enables and starts the unit, and
  * only then cancels the rollback. If saving fails, the previous files are
  * restored and the change stays pending, so confirm can be retried or the
@@ -190,6 +200,7 @@ export function confirmScriptText(): string {
         `    echo "The change was already rolled back" >&2`,
         `    exit ${ExitCode.alreadyRolledBack}`,
         "fi",
+        ...EXPECTED_TOKEN_CHECK,
         `rm -rf ${backupDirectory}`,
         `mkdir -p ${backupDirectory}`,
         ...PERSISTED_PATHS.map(path => `if [ -e "${path}" ]; then cp -p "${path}" ${backupDirectory}/${baseName(path)}; fi`),
@@ -232,7 +243,7 @@ export function confirmScriptText(): string {
     ].join("\n");
 }
 
-/** @returns the script that rolls back immediately ("Revert now"). */
+/** @returns the script that rolls back immediately ("Revert now"); $1 is the token of the change shown. */
 export function revertScriptText(): string {
     return [
         ...SCRIPT_PREAMBLE,
@@ -240,6 +251,7 @@ export function revertScriptText(): string {
         `    echo "No change is waiting for confirmation" >&2`,
         `    exit ${ExitCode.nothingToConfirm}`,
         "fi",
+        ...EXPECTED_TOKEN_CHECK,
         `systemctl stop "$rollback_unit.timer" 2>/dev/null || true`,
         RUN_ROLLBACK_NOW,
         "",
@@ -247,7 +259,7 @@ export function revertScriptText(): string {
 }
 
 /**
- * Status script. Prints one of: "none", "pending <seconds left>",
+ * Status script. Prints one of: "none", "pending <seconds left> <token>",
  * "rolled-back", "rollback-failed", "confirmed".
  */
 export function statusScriptText(): string {
@@ -259,7 +271,7 @@ export function statusScriptText(): string {
         `    now=$(date +%s)`,
         `    left=$((armed_at + ${ROLLBACK_TIMEOUT_SECONDS} - now))`,
         `    [ "$left" -ge 0 ] || left=0`,
-        `    echo "pending $left"`,
+        `    echo "pending $left $(cat "$state_directory/token" 2>/dev/null)"`,
         `elif [ -s "$state_directory/outcome" ]; then`,
         `    cat "$state_directory/outcome"`,
         "else",
@@ -272,14 +284,14 @@ export function statusScriptText(): string {
 /** Parsed output of the status script. */
 export type TransactionStatus =
     | { state: "none" | "rolled-back" | "rollback-failed" | "confirmed" }
-    | { state: "pending"; secondsLeft: number };
+    | { state: "pending"; secondsLeft: number; token: string };
 
 /** @returns the parsed status script output. Unknown output maps to "none". */
 export function parseTransactionStatus(output: string): TransactionStatus {
     const text = output.trim();
-    const pending = /^pending (\d+)$/.exec(text);
+    const pending = /^pending (\d+) ([0-9a-f-]{36})$/.exec(text);
     if (pending)
-        return { state: "pending", secondsLeft: Number(pending[1]) };
+        return { state: "pending", secondsLeft: Number(pending[1]), token: pending[2] };
     if (text === "rolled-back" || text === "rollback-failed" || text === "confirmed")
         return { state: text };
     return { state: "none" };

@@ -158,24 +158,27 @@ const HostsCard = ({ configuration, onChange, setError }: ConfigurationPageProps
         setImportMessage(null);
         try {
             const { summaries, failedInterfaces } = await importWireguardPeers();
-            let hosts = configuration.hosts;
             const messages: string[] = [];
-            // Rebuilt from this scan so stale ports are dropped; kept as they were if any file could not be read.
-            const listenPorts = new Set(failedInterfaces.length ? configuration.wireguardListenPorts : []);
             if (failedInterfaces.length)
                 messages.push(cockpit.format(_("Could not read: $0. Its peers and listen ports were left unchanged."), failedInterfaces.join(", ")));
-            for (const summary of summaries) {
-                const merged = mergeImportedHosts(hosts, summary);
-                hosts = merged.hosts;
-                if (summary.listenPort)
-                    listenPorts.add(summary.listenPort);
-                messages.push(cockpit.format(_("$0: $1 peer(s) imported"), summary.interfaceName, summary.hosts.length - merged.conflicts.length));
-                if (merged.conflicts.length)
-                    messages.push(cockpit.format(_("$0: skipped, a manual host has the same name: $1"), summary.interfaceName, merged.conflicts.join(", ")));
-                if (summary.skippedPeers.length)
-                    messages.push(cockpit.format(_("$0: skipped, no usable AllowedIPs: $1"), summary.interfaceName, summary.skippedPeers.join(", ")));
-            }
-            onChange({ ...configuration, hosts, wireguardListenPorts: [...listenPorts].sort((first, second) => first - second) });
+            // Merged into the latest draft: edits made while the scan ran are kept.
+            onChange(latest => {
+                let hosts = latest.hosts;
+                // Rebuilt from this scan so stale ports are dropped; kept as they were if any file could not be read.
+                const listenPorts = new Set(failedInterfaces.length ? latest.wireguardListenPorts : []);
+                for (const summary of summaries) {
+                    const merged = mergeImportedHosts(hosts, summary);
+                    hosts = merged.hosts;
+                    if (summary.listenPort)
+                        listenPorts.add(summary.listenPort);
+                    messages.push(cockpit.format(_("$0: $1 peer(s) imported"), summary.interfaceName, summary.hosts.length - merged.conflicts.length));
+                    if (merged.conflicts.length)
+                        messages.push(cockpit.format(_("$0: skipped, a manual host has the same name: $1"), summary.interfaceName, merged.conflicts.join(", ")));
+                    if (summary.skippedPeers.length)
+                        messages.push(cockpit.format(_("$0: skipped, no usable AllowedIPs: $1"), summary.interfaceName, summary.skippedPeers.join(", ")));
+                }
+                return { ...latest, hosts, wireguardListenPorts: [...listenPorts].sort((first, second) => first - second) };
+            });
             setImportMessage(summaries.length || failedInterfaces.length ? messages.join("\n") : _("No WireGuard configuration found in /etc/wireguard."));
         } catch (error) {
             setError(String(error));

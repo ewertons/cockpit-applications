@@ -39,11 +39,11 @@ function endpointFromSelection(zone: string, host: string): Endpoint {
 }
 
 /** Up/down/enable/remove controls for an ordered rule list. */
-function RuleControls<T extends { enabled: boolean }>({ rules, index, onRulesChange }: { rules: T[]; index: number; onRulesChange: (rules: T[]) => void }) {
+function RuleControls<T extends { enabled: boolean }>({ idPrefix, rules, index, onRulesChange }: { idPrefix: string; rules: T[]; index: number; onRulesChange: (rules: T[]) => void }) {
     return (
         <span className="fw-row-actions">
             <Switch
-                id={`enabled-${index}`} aria-label={_("Enabled")} isChecked={rules[index].enabled}
+                id={`${idPrefix}-enabled-${index}`} aria-label={_("Enabled")} isChecked={rules[index].enabled}
                 onChange={(_event, checked) => onRulesChange(replaceItem(rules, index, { ...rules[index], enabled: checked }))}
             />
             <Button variant="plain" aria-label={_("Move up")} isDisabled={index === 0} onClick={() => onRulesChange(moveItem(rules, index, -1))}>↑</Button>
@@ -91,7 +91,7 @@ const ForwardRulesCard = ({ configuration, onChange }: ConfigurationPageProps) =
                         rule.service,
                         describeVerdict(rule.action),
                         <RuleControls
-                            key="controls" rules={configuration.forwardRules} index={index}
+                            key="controls" idPrefix="forward" rules={configuration.forwardRules} index={index}
                             onRulesChange={forwardRules => onChange({ ...configuration, forwardRules })}
                         />,
                     ])}
@@ -155,7 +155,7 @@ const NatRulesCard = ({ configuration, onChange, setError }: ConfigurationPagePr
                         rule.sourceAddress ?? _("any"),
                         rule.egressZone,
                         <RuleControls
-                            key="controls" rules={configuration.natRules} index={index}
+                            key="controls" idPrefix="nat" rules={configuration.natRules} index={index}
                             onRulesChange={natRules => onChange({ ...configuration, natRules })}
                         />,
                     ])}
@@ -212,7 +212,7 @@ const InputRulesCard = ({ configuration, onChange }: ConfigurationPageProps) => 
                         rule.service,
                         describeVerdict(rule.action),
                         <RuleControls
-                            key="controls" rules={configuration.inputRules} index={index}
+                            key="controls" idPrefix="input" rules={configuration.inputRules} index={index}
                             onRulesChange={inputRules => onChange({ ...configuration, inputRules })}
                         />,
                     ])}

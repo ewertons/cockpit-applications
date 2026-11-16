@@ -124,9 +124,10 @@ export const ApplyPage = ({ configuration }: { configuration: FirewallConfigurat
     };
 
     const apply = () => ruleset && run(() => applyRuleset(ruleset.text, forwardingNeeded), null);
-    const confirm = () => run(confirmRuleset,
+    const pendingToken = hostState?.transaction.state === "pending" ? hostState.transaction.token : "";
+    const confirm = () => run(() => confirmRuleset(pendingToken),
                               cockpit.format(_("Changes kept and saved to $0. They are loaded at boot."), PERSISTED_RULESET_PATH));
-    const revert = () => run(revertRuleset, _("Reverted to the previous rules."));
+    const revert = () => run(() => revertRuleset(pendingToken), _("Reverted to the previous rules."));
 
     const unchanged = ruleset !== null && hostState !== null && hostState.persistedRuleset === ruleset.text &&
         ownTablesLoaded(ruleset.text, hostState.liveTables);

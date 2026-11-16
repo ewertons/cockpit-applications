@@ -75,19 +75,25 @@ export async function applyRuleset(rulesetText: string, enableForwarding: boolea
     }
 }
 
-/** Keeps the applied ruleset and persists it for boot. */
-export async function confirmRuleset(): Promise<void> {
+/**
+ * Keeps the applied ruleset and persists it for boot.
+ * @param token token of the pending change the user reviewed (from the status).
+ */
+export async function confirmRuleset(token: string): Promise<void> {
     try {
-        await cockpit.script(confirmScriptText(), [], { superuser: "require", err: "message" });
+        await cockpit.script(confirmScriptText(), [token], { superuser: "require", err: "message" });
     } catch (error) {
         throw new Error(errorMessage(error));
     }
 }
 
-/** Rolls back to the previous ruleset immediately. */
-export async function revertRuleset(): Promise<void> {
+/**
+ * Rolls back to the previous ruleset immediately.
+ * @param token token of the pending change shown to the user.
+ */
+export async function revertRuleset(token: string): Promise<void> {
     try {
-        await cockpit.script(revertScriptText(), [], { superuser: "require", err: "message" });
+        await cockpit.script(revertScriptText(), [token], { superuser: "require", err: "message" });
     } catch (error) {
         throw new Error(errorMessage(error));
     }

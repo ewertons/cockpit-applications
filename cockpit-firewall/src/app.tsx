@@ -28,13 +28,15 @@ function pageFromLocation(): ApplicationPage {
 /** Props shared by pages that edit the configuration. */
 export interface ConfigurationPageProps {
     configuration: FirewallConfiguration;
-    onChange: (configuration: FirewallConfiguration) => void;
+    /** Replaces the draft, or derives it from the latest draft (use after awaiting, so concurrent edits are kept). */
+    onChange: (change: FirewallConfiguration | ((latest: FirewallConfiguration) => FirewallConfiguration)) => void;
 }
 
 export const Application = () => {
     const [page, setPage] = useState<ApplicationPage>(pageFromLocation);
     const [configuration, setConfiguration] = useState<FirewallConfiguration | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const latestConfiguration = useRef<FirewallConfiguration | null>(null);
 
     useEffect(() => {
         const handler = () => setPage(pageFromLocation());
@@ -44,14 +46,22 @@ export const Application = () => {
 
     useEffect(() => {
         loadConfiguration()
-                .then(setConfiguration)
+                .then(loaded => {
+                    latestConfiguration.current = loaded;
+                    setConfiguration(loaded);
+                })
                 .catch(loadError => setError(cockpit.format(_("Cannot read the configuration: $0"), String(loadError?.message ?? loadError))));
     }, []);
 
     // Saves run one after another so an older draft never overwrites a newer one.
     const saveQueue = useRef<Promise<void>>(Promise.resolve());
 
-    const onChange = useCallback((updated: FirewallConfiguration) => {
+    const onChange = useCallback((change: FirewallConfiguration | ((latest: FirewallConfiguration) => FirewallConfiguration)) => {
+        const latest = latestConfiguration.current;
+        if (typeof change === "function" && !latest)
+            return;
+        const updated = typeof change === "function" ? change(latest!) : change;
+        latestConfiguration.current = updated;
         setConfiguration(updated);
         saveQueue.current = saveQueue.current
                 .then(() => saveConfiguration(updated))

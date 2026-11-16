@@ -82,12 +82,14 @@ export function parseWireguardConfiguration(interfaceName: string, text: string)
         }
         if (line.startsWith("#") || line.startsWith(";"))
             continue;
-        const separatorIndex = line.indexOf("=");
+        // Like wg-quick, drop inline comments: everything after '#'.
+        const content = line.replace(/#.*$/, "");
+        const separatorIndex = content.indexOf("=");
         if (separatorIndex === -1)
             continue;
-        const key = line.slice(0, separatorIndex).trim()
+        const key = content.slice(0, separatorIndex).trim()
                 .toLowerCase();
-        const values = line.slice(separatorIndex + 1).split(",")
+        const values = content.slice(separatorIndex + 1).split(",")
                 .map(value => value.trim())
                 .filter(Boolean);
         if (currentPeer && key === "allowedips") {
