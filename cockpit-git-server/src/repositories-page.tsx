@@ -12,6 +12,8 @@ import { SearchInput } from "@patternfly/react-core/dist/esm/components/SearchIn
 
 import cockpit from 'cockpit';
 
+import { repositoryConfigEnablesDaemonPush } from './git-daemon-config.js';
+
 const _ = cockpit.gettext;
 const BASE_PATH = "/srv/git";
 
@@ -20,6 +22,7 @@ interface RepoInfo {
     path: string;
     size: string;
     lastModified: string;
+    daemonPushEnabled: boolean;
 }
 
 export const RepositoriesPage = () => {
@@ -41,6 +44,8 @@ export const RepositoriesPage = () => {
     // Delete modal
     const [deleteRepo, setDeleteRepo] = useState<RepoInfo | null>(null);
     const [deleting, setDeleting] = useState(false);
+
+    const [disablingDaemonPush, setDisablingDaemonPush] = useState<string | null>(null);
 
     useEffect(() => {
         const h = cockpit.file('/etc/hostname');
@@ -70,11 +75,14 @@ export const RepositoriesPage = () => {
                         return Promise.all([
                             cockpit.spawn(["du", "-sh", dir], { superuser: "try", err: "ignore" }),
                             cockpit.spawn(["stat", "-c", "%Y", dir], { superuser: "try", err: "ignore" }),
-                        ]).then(([duOut, statOut]: [string, string]) => ({
+                            cockpit.spawn(["git", "config", "--file", `${dir}/config`, "--bool", "--get", "daemon.receivepack"], { superuser: "try", err: "ignore" })
+                                    .catch(() => ""),
+                        ]).then(([duOut, statOut, daemonPushOut]: [string, string, string]) => ({
                             name,
                             path: dir,
                             size: duOut.split("\t")[0] || "?",
                             lastModified: new Date(parseInt(statOut.trim()) * 1000).toLocaleString(),
+                            daemonPushEnabled: repositoryConfigEnablesDaemonPush(daemonPushOut),
                         }));
                     });
 
@@ -110,7 +118,6 @@ export const RepositoriesPage = () => {
 
         cockpit.spawn(["git", "init", "--bare", "--initial-branch=main", repoPath], { superuser: "require" })
                 .then(() => cockpit.spawn(["touch", `${repoPath}/git-daemon-export-ok`], { superuser: "require", err: "ignore" }))
-                .then(() => cockpit.spawn(["git", "config", "--file", `${repoPath}/config`, "daemon.receivepack", "true"], { superuser: "require", err: "ignore" }))
                 .then(() => cockpit.spawn(["chown", "-R", "git:git", repoPath], { superuser: "require", err: "ignore" }))
                 .then(() => {
                     setShowCreate(false);
@@ -139,6 +146,21 @@ export const RepositoriesPage = () => {
                     setError(ex.message || String(ex));
                     setDeleteRepo(null);
                     setDeleting(false);
+                });
+    };
+
+    const disableDaemonPush = (repo: RepoInfo) => {
+        setDisablingDaemonPush(repo.path);
+        setError("");
+
+        cockpit.spawn(["git", "config", "--file", `${repo.path}/config`, "--bool", "--replace-all", "daemon.receivepack", "false"], { superuser: "require", err: "message" })
+                .then(() => {
+                    setDisablingDaemonPush(null);
+                    loadRepos();
+                })
+                .catch((ex: cockpit.BasicError) => {
+                    setError(ex.message || String(ex));
+                    setDisablingDaemonPush(null);
                 });
     };
 
@@ -245,6 +267,26 @@ git push -u origin main`}
                                             </Button>
                                         </div>
                                     </div>
+                                    {repo.daemonPushEnabled && (
+                                        <Alert
+                                            variant="warning"
+                                            isInline
+                                            isPlain
+                                            title={_("Unauthenticated push over git:// is enabled for this repository (daemon.receivepack). Use SSH for pushing.")}
+                                            style={{ marginTop: "0.5rem" }}
+                                            actionLinks={
+                                                <Button
+                                                    variant="link"
+                                                    isInline
+                                                    onClick={() => disableDaemonPush(repo)}
+                                                    isLoading={disablingDaemonPush === repo.path}
+                                                    isDisabled={disablingDaemonPush === repo.path}
+                                                >
+                                                    {_("Disable push over git://")}
+                                                </Button>
+                                            }
+                                        />
+                                    )}
                                 </CardBody>
                             </Card>
                         ))}
