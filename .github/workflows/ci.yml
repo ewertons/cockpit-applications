@@ -60,7 +60,7 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        app: [cockpit-git-server, cockpit-security]
+        app: [cockpit-git-server, cockpit-backup, cockpit-security]
     defaults:
       run:
         working-directory: ${{ matrix.app }}
