@@ -24,6 +24,7 @@ A Cockpit extension for comprehensive Linux security monitoring and control.
 ### Monitoring
 - **Audit Logs** — View auditd or journalctl security logs with filtering
 - **Intrusion Detection** — Run AIDE/rkhunter/chkrootkit scans, SUID file audit, world-writable file detection
+- **ntopng** — Local setup asks for a new admin password (the packaged admin/admin is never kept) and binds the web UI to 127.0.0.1 by default; reach it through Cockpit or an SSH tunnel (`ssh -L 3000:127.0.0.1:3000 host`). Listening on all interfaces is an explicit opt-in.
 
 ### Maintenance
 - **System Updates** — Available/security updates, one-click upgrade (apt/dnf/zypper)
