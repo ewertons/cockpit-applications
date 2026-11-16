@@ -501,7 +501,7 @@ ntopng -i "ntopng -i tcp://${routerIP || "<ROUTER_IP>"}:${netflowPort}" -m "${nt
                         <Alert variant="warning" isInline className="pf-v6-u-mt-md" title={_("The local ntopng instance uses the default admin password. Set a new password.")} />
                     )}
                     {localInstalled && localLoopbackOnly === false && (
-                        <Alert variant="warning" isInline className="pf-v6-u-mt-md" title={_("The ntopng web interface listens on all network interfaces.")}>
+                        <Alert variant="warning" isInline className="pf-v6-u-mt-md" title={_("The ntopng web interface is reachable from the network (not only on 127.0.0.1).")}>
                             {_("Restrict it to 127.0.0.1 unless other machines must reach it directly.")}
                         </Alert>
                     )}
@@ -514,7 +514,7 @@ ntopng -i "ntopng -i tcp://${routerIP || "<ROUTER_IP>"}:${netflowPort}" -m "${nt
             </Card>
 
             {showLocalSetup && (
-                <Modal variant="small" isOpen onClose={() => setShowLocalSetup(false)}>
+                <Modal variant="small" isOpen onClose={() => { if (!settingUpLocal) setShowLocalSetup(false); }}>
                     <ModalHeader title={_("Set up local ntopng")} />
                     <ModalBody>
                         {setupError && <Alert variant="danger" isInline title={setupError} className="pf-v6-u-mb-md" />}
@@ -543,7 +543,7 @@ ntopng -i "ntopng -i tcp://${routerIP || "<ROUTER_IP>"}:${netflowPort}" -m "${nt
                         <Button variant="primary" onClick={setUpLocalNtopng} isLoading={settingUpLocal} isDisabled={settingUpLocal || !setupPassword}>
                             {_("Apply")}
                         </Button>
-                        <Button variant="link" onClick={() => setShowLocalSetup(false)}>
+                        <Button variant="link" onClick={() => setShowLocalSetup(false)} isDisabled={settingUpLocal}>
                             {_("Cancel")}
                         </Button>
                     </ModalFooter>
