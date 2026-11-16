@@ -1,5 +1,15 @@
 import cockpit from 'cockpit';
 
+import {
+    assertValidEnvironmentVariable,
+    assertValidRepository,
+    buildSftpCommandOption,
+    escapeSystemdText,
+    hasControlCharacters,
+    quoteSystemdExecArgument,
+    systemdEnvironmentLine,
+} from './command-arguments.js';
+
 // Types for restic JSON output
 
 export interface ResticSnapshot {
@@ -91,21 +101,9 @@ const JOBS_FILE = `${CONFIG_DIR}/jobs.json`;
 const DESTINATIONS_FILE = `${CONFIG_DIR}/destinations.json`;
 const PASSWORDS_DIR = `${CONFIG_DIR}/passwords`;
 
-// Extract user@host from an sftp repo URL for use in sftp.command
-function sftpHost(repo: string): string {
-    if (repo.startsWith('sftp://')) {
-        const match = repo.match(/^sftp:\/\/([^/]+)/);
-        return match ? match[1] : '';
-    } else if (repo.startsWith('sftp:')) {
-        const rest = repo.slice(5);
-        const idx = rest.indexOf(':');
-        return idx !== -1 ? rest.slice(0, idx) : rest;
-    }
-    return '';
-}
-
 // Execute a restic command with JSON output
 function resticCmd(args: string[], repo: string, passwordFile: string, envVars?: Record<string, string>): Promise<string> {
+    assertValidRepository(repo);
     const env: string[] = [];
     env.push(`RESTIC_REPOSITORY=${repo}`);
     env.push(`RESTIC_PASSWORD_FILE=${passwordFile}`);
@@ -114,11 +112,9 @@ function resticCmd(args: string[], repo: string, passwordFile: string, envVars?:
     if (envVars) {
         for (const [key, val] of Object.entries(envVars)) {
             if (key === '_SSH_KEY' && val) {
-                const host = sftpHost(repo);
-                if (host) {
-                    extraArgs.push("-o", `sftp.command=ssh ${host} -i ${val} -o StrictHostKeyChecking=accept-new -s sftp`);
-                }
-            } else {
+                extraArgs.push(...buildSftpCommandOption(repo, val));
+            } else if (key !== '_SSH_KEY') {
+                assertValidEnvironmentVariable(key, val);
                 env.push(`${key}=${val}`);
             }
         }
@@ -162,6 +158,7 @@ export function buildBackupCommand(
     },
     envVars?: Record<string, string>,
 ): { env: string[]; resticArgs: string[] } {
+    assertValidRepository(repo);
     const args: string[] = ["backup", "--json"];
 
     if (options.excludes) {
@@ -194,7 +191,7 @@ export function buildBackupCommand(
         args.push("--one-file-system");
     }
 
-    args.push(...sources);
+    args.push("--", ...sources);
 
     const env: string[] = [];
     env.push(`RESTIC_REPOSITORY=${repo}`);
@@ -203,11 +200,9 @@ export function buildBackupCommand(
     if (envVars) {
         for (const [key, val] of Object.entries(envVars)) {
             if (key === '_SSH_KEY' && val) {
-                const host = sftpHost(repo);
-                if (host) {
-                    extraArgs.push("-o", `sftp.command=ssh ${host} -i ${val} -o StrictHostKeyChecking=accept-new -s sftp`);
-                }
-            } else {
+                extraArgs.push(...buildSftpCommandOption(repo, val));
+            } else if (key !== '_SSH_KEY') {
+                assertValidEnvironmentVariable(key, val);
                 env.push(`${key}=${val}`);
             }
         }
@@ -365,7 +360,7 @@ export function restoreSnapshot(
     },
     envVars?: Record<string, string>
 ): Promise<string> {
-    const args: string[] = ["restore", snapshotId, "--target", target, "--json"];
+    const args: string[] = ["restore", "--target", target, "--json"];
 
     if (options?.include) {
         for (const inc of options.include) {
@@ -377,6 +372,7 @@ export function restoreSnapshot(
             args.push("--exclude", ex);
         }
     }
+    args.push("--", snapshotId);
 
     return resticCmd(args, repo, passwordFile, envVars);
 }
@@ -402,7 +398,7 @@ export async function forgetSnapshots(
     if (prune) args.push("--prune");
 
     if (snapshotIds) {
-        args.push(...snapshotIds);
+        args.push("--", ...snapshotIds);
     }
 
     return resticCmd(args, repo, passwordFile, envVars);
@@ -415,7 +411,7 @@ export async function deleteSnapshot(
     passwordFile: string,
     envVars?: Record<string, string>
 ): Promise<string> {
-    return resticCmd(["forget", snapshotId, "--prune", "--json"], repo, passwordFile, envVars);
+    return resticCmd(["forget", "--prune", "--json", "--", snapshotId], repo, passwordFile, envVars);
 }
 
 // Add a tag to a snapshot
@@ -426,7 +422,7 @@ export async function tagSnapshot(
     passwordFile: string,
     envVars?: Record<string, string>
 ): Promise<string> {
-    return resticCmd(["tag", "--add", tag, snapshotId], repo, passwordFile, envVars);
+    return resticCmd(["tag", "--add", tag, "--", snapshotId], repo, passwordFile, envVars);
 }
 
 // List files in a snapshot
@@ -437,7 +433,7 @@ export async function listSnapshotFiles(
     passwordFile: string,
     envVars?: Record<string, string>
 ): Promise<string> {
-    return resticCmd(["ls", snapshotId, path, "--json"], repo, passwordFile, envVars);
+    return resticCmd(["ls", "--json", "--", snapshotId, path], repo, passwordFile, envVars);
 }
 
 // Check repository integrity
@@ -498,6 +494,9 @@ export async function enableJobSchedule(job: BackupJob): Promise<void> {
     if (!job.schedule) return;
 
     const serviceName = `${SERVICE_PREFIX}-${job.id}`;
+    assertValidRepository(job.repository);
+    if (hasControlCharacters(job.schedule))
+        throw new Error("Schedule must not contain line breaks or control characters");
 
     // Find the matching destination to get SSH key and env vars
     const destinations = await loadDestinations();
@@ -505,22 +504,19 @@ export async function enableJobSchedule(job: BackupJob): Promise<void> {
 
     // Build environment lines
     const envLines: string[] = [
-        `Environment="RESTIC_REPOSITORY=${job.repository}"`,
-        `Environment="RESTIC_PASSWORD_FILE=${job.password_file}"`,
+        systemdEnvironmentLine("RESTIC_REPOSITORY", job.repository),
+        systemdEnvironmentLine("RESTIC_PASSWORD_FILE", job.password_file),
     ];
     if (dest?.env_vars) {
         for (const [key, val] of Object.entries(dest.env_vars)) {
             if (key !== '_SSH_KEY') {
-                envLines.push(`Environment="${key}=${val}"`);
+                envLines.push(systemdEnvironmentLine(key, val));
             }
         }
     }
 
     // Build the restic command arguments
     const args: string[] = ["backup", "--json"];
-    for (const src of job.sources) {
-        args.push(src);
-    }
     for (const ex of job.excludes) {
         args.push("--exclude", ex);
     }
@@ -550,27 +546,27 @@ export async function enableJobSchedule(job: BackupJob): Promise<void> {
     const connOpts: string[] = [];
     const sshKeyPath = dest?.ssh_key;
     if (sshKeyPath) {
-        const host = sftpHost(job.repository);
-        if (host) {
-            connOpts.push("-o", `sftp.command=ssh ${host} -i ${sshKeyPath} -o StrictHostKeyChecking=accept-new -s sftp`);
-        }
+        connOpts.push(...buildSftpCommandOption(job.repository, sshKeyPath));
     }
     args.push(...connOpts);
+    args.push("--", ...job.sources);
 
-    const quote = (a: string) => (a.includes(' ') ? `"${a}"` : a);
-    const execStart = `/usr/bin/restic ${args.map(quote).join(' ')}`;
+    const execStart = `/usr/bin/restic ${args.map(quoteSystemdExecArgument).join(' ')}`;
 
     // Pre-flight check: verify the repository is reachable before attempting the
     // backup. For remote (sftp/cloud) repositories the underlying backup disk may
     // be unmounted or disconnected, in which case restic fails with a cryptic
     // "unable to open config file" error. This surfaces a clear message instead.
-    const precheckCmd = `/usr/bin/restic ${connOpts.map(quote).join(' ')} cat config`.trim();
-    const execStartPre =
-        `/bin/sh -c '${precheckCmd} >/dev/null 2>&1 || ` +
-        `{ echo "ERROR: backup repository $RESTIC_REPOSITORY is not reachable — is the backup disk mounted/connected on the destination?" >&2; exit 1; }'`;
+    // The script is constant; restic and its options are passed as "$@".
+    const precheckScript =
+        `"$@" >/dev/null 2>&1 || ` +
+        `{ echo "ERROR: backup repository $RESTIC_REPOSITORY is not reachable — is the backup disk mounted/connected on the destination?" >&2; exit 1; }`;
+    const execStartPre = ["/bin/sh", "-c", precheckScript, "sh", "/usr/bin/restic", ...connOpts, "cat", "config"]
+            .map((argument, index) => index === 0 ? argument : quoteSystemdExecArgument(argument))
+            .join(' ');
 
     const serviceContent = `[Unit]
-Description=Cockpit Backup Job: ${job.name}
+Description=Cockpit Backup Job: ${escapeSystemdText(job.name)}
 After=network-online.target
 Wants=network-online.target
 
@@ -582,7 +578,7 @@ ExecStart=${execStart}
 `;
 
     const timerContent = `[Unit]
-Description=Timer for Cockpit Backup Job: ${job.name}
+Description=Timer for Cockpit Backup Job: ${escapeSystemdText(job.name)}
 
 [Timer]
 OnCalendar=${job.schedule}
