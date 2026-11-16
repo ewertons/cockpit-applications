@@ -34,3 +34,8 @@ export async function repoGit(repoPath: string, args: string[]): Promise<string>
         return "";
     }
 }
+
+/** Resolves false when the git account that repoGit runs as does not exist. */
+export function gitAccountExists(): Promise<boolean> {
+    return cockpit.spawn(["getent", "passwd", "git"], { err: "ignore" }).then(() => true, () => false);
+}

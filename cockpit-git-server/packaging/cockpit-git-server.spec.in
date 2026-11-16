@@ -73,5 +73,7 @@ appstream-util validate-relax --nonet %{buildroot}/%{_datadir}/metainfo/*
 %license LICENSE dist/index.js.LEGAL.txt
 %{_datadir}/cockpit/*
 %{_datadir}/metainfo/*
+%{_sysusersdir}/%{name}.conf
+%{_tmpfilesdir}/%{name}.conf
 
 %changelog

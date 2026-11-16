@@ -88,6 +88,10 @@ if $USER_INSTALL; then
     mkdir -p "$HOME/.local/share/cockpit"
     rm -rf "$DEST"
     cp -r dist "$DEST"
+    if ! id -u git &>/dev/null; then
+        echo "    NOTE: repositories are read as the 'git' account, which does not exist." >&2
+        echo "    Create it once with: sudo useradd -r -m -d /srv/git -s /usr/bin/git-shell git" >&2
+    fi
 else
     DEST="/usr/share/cockpit/$PACKAGE_NAME"
     echo "==> Installing to $DEST (system-wide, requires root)..."

@@ -11,6 +11,7 @@ import { ClipboardCopy } from "@patternfly/react-core/dist/esm/components/Clipbo
 import { SearchInput } from "@patternfly/react-core/dist/esm/components/SearchInput/index.js";
 
 import cockpit from 'cockpit';
+import { gitAccountExists } from './repo-git.js';
 
 const _ = cockpit.gettext;
 const BASE_PATH = "/srv/git";
@@ -41,6 +42,11 @@ export const RepositoriesPage = () => {
     // Delete modal
     const [deleteRepo, setDeleteRepo] = useState<RepoInfo | null>(null);
     const [deleting, setDeleting] = useState(false);
+    const [gitAccountMissing, setGitAccountMissing] = useState(false);
+
+    useEffect(() => {
+        gitAccountExists().then(exists => setGitAccountMissing(!exists));
+    }, []);
 
     useEffect(() => {
         const h = cockpit.file('/etc/hostname');
@@ -174,6 +180,11 @@ export const RepositoriesPage = () => {
             </div>
 
             {error && <Alert variant="danger" title={error} isInline />}
+            {gitAccountMissing && (
+                <Alert variant="warning" isInline title={_("The git account does not exist")}>
+                    {_("Repository contents are read as the git account. Create it with: useradd -r -m -d /srv/git -s /usr/bin/git-shell git")}
+                </Alert>
+            )}
 
             {justCreated && (
                 <Card style={{ marginBottom: "1rem" }}>
