@@ -107,5 +107,8 @@ describe("systemd quoting", () => {
 
     test("free text stays on one line", () => {
         assert.equal(escapeSystemdText("Nightly 100%\n[Service]"), "Nightly 100%% [Service]");
+        assert.equal(escapeSystemdText("Nightly\\"), "Nightly");
+        assert.equal(escapeSystemdText("Nightly \\ \\\n"), "Nightly");
+        assert.equal(escapeSystemdText("C:\\backup\\daily"), "C:\\backup\\daily");
     });
 });
