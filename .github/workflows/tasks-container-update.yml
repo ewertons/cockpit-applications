@@ -10,9 +10,9 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-      statuses: write
     container:
-      image: ghcr.io/cockpit-project/tasks
+      # Pinned by digest; update the tag and digest together.
+      image: ghcr.io/cockpit-project/tasks:2026-11-14@sha256:92c170d925e990bce71c0c7480856e830b14710e2d9d48ccb3758ed0199fea94
       options: --user root
     steps:
       - name: Set up configuration and secrets

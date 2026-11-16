@@ -7,11 +7,12 @@
   "author": "",
   "license": "LGPL-2.1",
   "engines": {
-    "node": ">= 16"
+    "node": ">= 22"
   },
   "scripts": {
     "watch": "ESBUILD_WATCH='true' ./build.js",
     "build": "./build.js",
+    "test": "node test/unit/run.js",
     "eslint": "eslint src/",
     "eslint:fix": "eslint --fix src/",
     "stylelint": "stylelint src/*.{css,scss}",

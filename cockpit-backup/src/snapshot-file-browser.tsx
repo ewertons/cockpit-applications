@@ -6,6 +6,7 @@ import { Alert } from "@patternfly/react-core/dist/esm/components/Alert/index.js
 
 import cockpit from 'cockpit';
 import { Destination, destEnvVars, ResticSnapshot } from './restic.js';
+import { assertValidEnvironmentVariable, assertValidRepository, buildSftpCommandOption } from './command-arguments.js';
 
 const _ = cockpit.gettext;
 
@@ -37,12 +38,6 @@ function formatDate(mtime: string): string {
     return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function sftpHost(repo: string): string | null {
-    const match = repo.match(/sftp:([^@]+@)?([^:/]+)/);
-    if (!match) return null;
-    return (match[1] || '') + match[2];
-}
-
 async function lsSnapshot(
     snapshotId: string,
     path: string,
@@ -50,6 +45,7 @@ async function lsSnapshot(
 ): Promise<FileEntry[]> {
     for (const dest of destinations) {
         try {
+            assertValidRepository(dest.path);
             const environ = [
                 `RESTIC_REPOSITORY=${dest.path}`,
                 `RESTIC_PASSWORD_FILE=${dest.password_file}`,
@@ -59,16 +55,14 @@ async function lsSnapshot(
             if (envVars) {
                 for (const [key, val] of Object.entries(envVars)) {
                     if (key === '_SSH_KEY' && val) {
-                        const host = sftpHost(dest.path);
-                        if (host) {
-                            resticArgs.push("-o", `sftp.command=ssh ${host} -i ${val} -o StrictHostKeyChecking=accept-new -s sftp`);
-                        }
-                    } else {
+                        resticArgs.push(...buildSftpCommandOption(dest.path, val));
+                    } else if (key !== '_SSH_KEY') {
+                        assertValidEnvironmentVariable(key, val);
                         environ.push(`${key}=${val}`);
                     }
                 }
             }
-            const output = await cockpit.spawn(["restic", ...resticArgs, "ls", snapshotId, path, "--json"],
+            const output = await cockpit.spawn(["restic", ...resticArgs, "ls", "--json", "--", snapshotId, path],
                                                { superuser: "try", err: "message", environ });
             const entries: FileEntry[] = [];
             for (const line of output.trim().split('\n')) {

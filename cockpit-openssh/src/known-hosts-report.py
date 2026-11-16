@@ -12,6 +12,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 
 CONFIG = "/etc/cockpit-openssh/known-hosts-report.conf"
@@ -147,11 +148,18 @@ def main() -> int:
         "counts": counts,
     }
 
-    os.makedirs(os.path.dirname(OUTPUT), exist_ok=True)
-    tmp = OUTPUT + ".new"
-    with open(tmp, "w", encoding="utf-8") as report_file:
-        json.dump(report, report_file, indent=2)
-    os.replace(tmp, OUTPUT)
+    state_dir = os.path.dirname(OUTPUT)
+    os.makedirs(state_dir, mode=0o700, exist_ok=True)
+    os.chmod(state_dir, 0o700)
+    # mkstemp creates the file 0600 with an unpredictable name.
+    descriptor, temporary_path = tempfile.mkstemp(prefix=".known-hosts-report.", dir=state_dir)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as report_file:
+            json.dump(report, report_file, indent=2)
+        os.replace(temporary_path, OUTPUT)
+    except BaseException:
+        os.unlink(temporary_path)
+        raise
 
     summary = ", ".join(f"{key}={value}" for key, value in sorted(counts.items()))
     print(f"known_hosts check complete: {summary or 'no entries'}")
