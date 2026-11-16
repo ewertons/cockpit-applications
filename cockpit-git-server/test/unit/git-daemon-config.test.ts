@@ -37,44 +37,49 @@ describe("defaultsEnableReceivePack", () => {
     });
 });
 
-const READ_ONLY = "--disable=receive-pack --forbid-override=receive-pack";
+const READ_ONLY_BLOCK = `# Added by cockpit-git-server: push is accepted over SSH only.
+GIT_DAEMON_OPTIONS="$GIT_DAEMON_OPTIONS --disable=receive-pack --forbid-override=receive-pack"
+`;
 
 describe("removeReceivePackFromDefaults", () => {
-    test("keeps other options and forbids per-repository overrides", () => {
-        const result = removeReceivePackFromDefaults('A=1\nGIT_DAEMON_OPTIONS="--verbose --enable=receive-pack"\n');
-        assert.equal(result, `A=1\nGIT_DAEMON_OPTIONS="--verbose ${READ_ONLY}"\n`);
+    test("appends the read-only options and leaves existing lines unchanged", () => {
+        const original = 'A=1\nGIT_DAEMON_OPTIONS="--listen=$GIT_DAEMON_ADDRESS --enable=receive-pack" # legacy\n';
+        const result = removeReceivePackFromDefaults(original);
+        assert.equal(result, original + READ_ONLY_BLOCK);
         assert.equal(defaultsEnableReceivePack(result), false);
     });
 
-    test("keeps a trailing comment outside the quotes", () => {
-        assert.equal(removeReceivePackFromDefaults('GIT_DAEMON_OPTIONS="--enable=receive-pack" # legacy clients'),
-                     `GIT_DAEMON_OPTIONS="${READ_ONLY}" # legacy clients`);
+    test("keeps a multi-line value intact", () => {
+        const original = 'GIT_DAEMON_OPTIONS="--verbose \\\n  --enable=receive-pack"\n';
+        assert.equal(removeReceivePackFromDefaults(original), original + READ_ONLY_BLOCK);
     });
 
-    test("does not duplicate options when run twice", () => {
-        const once = removeReceivePackFromDefaults('GIT_DAEMON_OPTIONS="--allow-override=receive-pack"\n');
+    test("ends a trailing backslash continuation before appending", () => {
+        assert.equal(removeReceivePackFromDefaults("A=1 \\\n"), "A=1 \\\n\n" + READ_ONLY_BLOCK);
+    });
+
+    test("is idempotent and moves the block after later assignments", () => {
+        const once = removeReceivePackFromDefaults("A=1\n");
         assert.equal(removeReceivePackFromDefaults(once), once);
-        assert.equal(once, `GIT_DAEMON_OPTIONS="${READ_ONLY}"\n`);
-    });
-
-    test("adds the options line when missing", () => {
-        assert.equal(removeReceivePackFromDefaults("A=1\n"), `A=1\nGIT_DAEMON_OPTIONS="${READ_ONLY}"\n`);
+        const later = once + 'GIT_DAEMON_OPTIONS="--enable=receive-pack"\n';
+        assert.equal(defaultsEnableReceivePack(later), true);
+        assert.equal(removeReceivePackFromDefaults(later), 'A=1\nGIT_DAEMON_OPTIONS="--enable=receive-pack"\n' + READ_ONLY_BLOCK);
     });
 });
 
 describe("configureReadOnlyDefaults", () => {
-    test("rewrites Debian defaults without receive-pack", () => {
+    test("rewrites Debian defaults and forces receive-pack off", () => {
         const result = configureReadOnlyDefaults(DEBIAN_DEFAULTS, "/srv/git");
         assert.equal(result, `# Defaults for git-daemon
 GIT_DAEMON_ENABLE=true
 GIT_DAEMON_USER=git
 GIT_DAEMON_BASE_PATH=/srv/git
 GIT_DAEMON_DIRECTORY=/srv/git
-GIT_DAEMON_OPTIONS="${READ_ONLY}"
-`);
+GIT_DAEMON_OPTIONS=""
+` + READ_ONLY_BLOCK);
     });
 
-    test("drops receive-pack set by earlier versions and adds missing settings", () => {
+    test("overrides receive-pack set by earlier versions and adds missing settings", () => {
         const result = configureReadOnlyDefaults('GIT_DAEMON_OPTIONS="--enable=receive-pack"', "/srv/git");
         assert.equal(defaultsEnableReceivePack(result), false);
         assert.match(result, /^GIT_DAEMON_ENABLE=true$/m);
@@ -83,7 +88,7 @@ GIT_DAEMON_OPTIONS="${READ_ONLY}"
 
     test("handles an empty file", () => {
         assert.equal(configureReadOnlyDefaults("", "/srv/git"),
-                     `GIT_DAEMON_OPTIONS="${READ_ONLY}"\nGIT_DAEMON_ENABLE=true\nGIT_DAEMON_USER=git\nGIT_DAEMON_BASE_PATH=/srv/git\nGIT_DAEMON_DIRECTORY=/srv/git\n`);
+                     "GIT_DAEMON_ENABLE=true\nGIT_DAEMON_USER=git\nGIT_DAEMON_BASE_PATH=/srv/git\nGIT_DAEMON_DIRECTORY=/srv/git\n" + READ_ONLY_BLOCK);
     });
 });
 
