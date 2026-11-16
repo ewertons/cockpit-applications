@@ -16,7 +16,7 @@ A [Cockpit](https://cockpit-project.org/) extension for managing bare Git reposi
 
 - [Cockpit](https://cockpit-project.org/) installed and running
 - `git` installed (`/usr/bin/git`)
-- Node.js and npm (for building)
+- Node.js >= 22 and npm (for building)
 
 On Debian/Ubuntu:
 
