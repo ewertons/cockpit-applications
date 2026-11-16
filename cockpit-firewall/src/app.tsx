@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert } from "@patternfly/react-core/dist/esm/components/Alert/index.js";
 import { Nav, NavItem, NavList } from "@patternfly/react-core/dist/esm/components/Nav/index.js";
 import { Page, PageSection } from "@patternfly/react-core/dist/esm/components/Page/index.js";
@@ -48,9 +48,13 @@ export const Application = () => {
                 .catch(loadError => setError(cockpit.format(_("Cannot read the configuration: $0"), String(loadError?.message ?? loadError))));
     }, []);
 
+    // Saves run one after another so an older draft never overwrites a newer one.
+    const saveQueue = useRef<Promise<void>>(Promise.resolve());
+
     const onChange = useCallback((updated: FirewallConfiguration) => {
         setConfiguration(updated);
-        saveConfiguration(updated)
+        saveQueue.current = saveQueue.current
+                .then(() => saveConfiguration(updated))
                 .then(() => setError(null))
                 .catch(saveError => setError(cockpit.format(_("Cannot save the configuration: $0"), String(saveError?.message ?? saveError))));
     }, []);

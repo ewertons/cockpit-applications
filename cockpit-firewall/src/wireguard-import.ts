@@ -38,6 +38,18 @@ function ipv4Network(address: string): string | null {
     return `${[24, 16, 8, 0].map(shift => (network >>> shift) & 255).join(".")}/${prefixLength}`;
 }
 
+/** @returns the first `<interface>-peer-<n>` (or `peer-<n>`) name, n >= start, not in usedNames. */
+function unusedFallbackName(interfaceName: string, start: number, usedNames: Set<string>): string {
+    const prefix = interfaceName.replace(/[^A-Za-z0-9_.-]/g, "");
+    for (let number = start; ; number++) {
+        let name = `${prefix}-peer-${number}`;
+        if (!isValidObjectName(name))
+            name = `peer-${number}`;
+        if (!usedNames.has(name))
+            return name;
+    }
+}
+
 /**
  * Parses one wg-quick configuration file into hosts (one per peer).
  * Peer names come from the `# Name = ...` comment; unnamed peers are named
@@ -97,14 +109,12 @@ export function parseWireguardConfiguration(interfaceName: string, text: string)
     peers.forEach((peer, index) => {
         let name = peer.name ? sanitizeHostName(peer.name) : "";
         if (!name || usedNames.has(name))
-            name = `${interfaceName.replace(/[^A-Za-z0-9_.-]/g, "")}-peer-${index + 1}`;
-        if (!isValidObjectName(name))
-            name = `peer-${index + 1}`;
+            name = unusedFallbackName(interfaceName, index + 1, usedNames);
         const addresses = [...new Set(peer.allowedAddresses
                 .map(address => parseAddress(address)?.text)
                 .filter((address): address is string => address !== undefined))];
-        // A peer routing everything (0.0.0.0/0) is a gateway, not a host to name in rules.
-        const usable = addresses.filter(address => address !== "0.0.0.0/0" && address !== "::/0");
+        // A peer routing everything (any /0, however spelled) is a gateway, not a host to name in rules.
+        const usable = addresses.filter(address => !address.endsWith("/0"));
         if (usable.length === 0) {
             summary.skippedPeers.push(peer.name || name);
             return;

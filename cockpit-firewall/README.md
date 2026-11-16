@@ -98,6 +98,13 @@ nftables is restarted or reloaded. It is enabled when a change is confirmed.
 
 **Revert now** restores the snapshot immediately.
 
+Apply, confirm, revert and the rollback serialize on a lock (`flock`) in
+`/run/cockpit-firewall`; each apply has its own token, so a stale rollback cannot
+revert a later change. If saving fails on **Keep changes**, the previous files are
+restored and the change stays pending (retry, or it is rolled back). Confirming
+also starts `cockpit-firewall.service` so an nftables reload restores the rules
+right away.
+
 ### Coexistence
 
 A packet traverses every base chain on a hook. A `drop` in any of them (for
