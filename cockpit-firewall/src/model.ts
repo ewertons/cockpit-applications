@@ -23,6 +23,8 @@ export interface HostEntry {
     /** "wireguard" when imported read-only from a WireGuard peer. */
     origin: "manual" | "wireguard";
     wireguardInterface?: string;
+    /** Peer PublicKey, for hosts imported from WireGuard. */
+    wireguardPublicKey?: string;
 }
 
 export interface PortSpecification {

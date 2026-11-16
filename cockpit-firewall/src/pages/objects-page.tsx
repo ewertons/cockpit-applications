@@ -175,7 +175,11 @@ const HostsCard = ({ configuration, onChange, setError }: ConfigurationPageProps
                     if (merged.conflicts.length)
                         messages.push(cockpit.format(_("$0: skipped, a manual host has the same name: $1"), summary.interfaceName, merged.conflicts.join(", ")));
                     if (summary.skippedPeers.length)
-                        messages.push(cockpit.format(_("$0: skipped, no usable AllowedIPs: $1"), summary.interfaceName, summary.skippedPeers.join(", ")));
+                        messages.push(cockpit.format(_("$0: skipped, no PublicKey or no usable AllowedIPs: $1"), summary.interfaceName, summary.skippedPeers.join(", ")));
+                    if (merged.removed.length)
+                        messages.push(cockpit.format(_("$0: removed, no longer in the file under that name; check rules using: $1"), summary.interfaceName, merged.removed.join(", ")));
+                    if (merged.reassigned.length)
+                        messages.push(cockpit.format(_("$0: now a different peer (or not verifiable); check rules using: $1"), summary.interfaceName, merged.reassigned.join(", ")));
                 }
                 return { ...latest, hosts, wireguardListenPorts: [...listenPorts].sort((first, second) => first - second) };
             });
