@@ -12,7 +12,7 @@ export interface WireguardInterfaceSummary {
     /** Interface addresses converted to their networks, e.g. 10.99.0.1/24 -> 10.99.0.0/24. */
     networks: string[];
     hosts: HostEntry[];
-    /** Peers skipped because they have no usable AllowedIPs. */
+    /** Peers skipped because they have no PublicKey or no usable AllowedIPs. */
     skippedPeers: string[];
 }
 
@@ -38,13 +38,19 @@ function ipv4Network(address: string): string | null {
     return `${[24, 16, 8, 0].map(shift => (network >>> shift) & 255).join(".")}/${prefixLength}`;
 }
 
-/** @returns the first `<interface>-peer-<n>` (or `peer-<n>`) name, n >= start, not in usedNames. */
-function unusedFallbackName(interfaceName: string, start: number, usedNames: Set<string>): string {
+/**
+ * @returns a name derived from the peer's PublicKey, `<interface>-peer-<key prefix>`,
+ * so it stays with the same peer when others are added or removed. A numeric
+ * suffix is added only if it is already in usedNames.
+ */
+function publicKeyFallbackName(interfaceName: string, publicKey: string, usedNames: Set<string>): string {
     const prefix = interfaceName.replace(/[^A-Za-z0-9_.-]/g, "");
-    for (let number = start; ; number++) {
-        let name = `${prefix}-peer-${number}`;
-        if (!isValidObjectName(name))
-            name = `peer-${number}`;
+    const keyTag = publicKey.replace(/[^A-Za-z0-9]/g, "").slice(0, 8);
+    let base = `${prefix}-peer-${keyTag}`;
+    if (!isValidObjectName(base))
+        base = `peer-${keyTag}`;
+    for (let suffix = 1; ; suffix++) {
+        const name = suffix === 1 ? base : `${base}-${suffix}`;
         if (!usedNames.has(name))
             return name;
     }
@@ -53,20 +59,23 @@ function unusedFallbackName(interfaceName: string, start: number, usedNames: Set
 /**
  * Parses one wg-quick configuration file into hosts (one per peer).
  * Peer names come from the `# Name = ...` comment; unnamed peers are named
- * `<interface>-peer-<n>`. Only valid AllowedIPs are kept.
+ * after their PublicKey (`<interface>-peer-<key prefix>`). Peers without a
+ * PublicKey are skipped. Only valid AllowedIPs are kept.
  */
 export function parseWireguardConfiguration(interfaceName: string, text: string): WireguardInterfaceSummary {
     const summary: WireguardInterfaceSummary = { interfaceName, networks: [], hosts: [], skippedPeers: [] };
     if (!isValidInterfaceName(interfaceName) || interfaceName.endsWith("*"))
         return summary;
 
-    interface PeerDraft { name?: string; allowedAddresses: string[] }
+    interface PeerDraft { name?: string; publicKey?: string; allowedAddresses: string[] }
     const peers: PeerDraft[] = [];
     let section: "interface" | "peer" | null = null;
 
     for (const rawLine of text.split(/\r?\n/)) {
         const line = rawLine.trim();
-        const sectionMatch = /^\[(\w+)\]$/.exec(line);
+        // Like wg-quick, drop inline comments: everything after '#'. "# Name =" is read from the full line.
+        const content = line.replace(/#.*$/, "").trim();
+        const sectionMatch = /^\[(\w+)\]$/.exec(content);
         if (sectionMatch) {
             const sectionName = sectionMatch[1].toLowerCase();
             section = sectionName === "interface" || sectionName === "peer" ? sectionName : null;
@@ -82,8 +91,6 @@ export function parseWireguardConfiguration(interfaceName: string, text: string)
         }
         if (line.startsWith("#") || line.startsWith(";"))
             continue;
-        // Like wg-quick, drop inline comments: everything after '#'.
-        const content = line.replace(/#.*$/, "");
         const separatorIndex = content.indexOf("=");
         if (separatorIndex === -1)
             continue;
@@ -92,7 +99,9 @@ export function parseWireguardConfiguration(interfaceName: string, text: string)
         const values = content.slice(separatorIndex + 1).split(",")
                 .map(value => value.trim())
                 .filter(Boolean);
-        if (currentPeer && key === "allowedips") {
+        if (currentPeer && key === "publickey") {
+            currentPeer.publicKey = values[0];
+        } else if (currentPeer && key === "allowedips") {
             currentPeer.allowedAddresses.push(...values);
         } else if (section === "interface" && key === "listenport") {
             const port = Number(values[0]);
@@ -108,10 +117,14 @@ export function parseWireguardConfiguration(interfaceName: string, text: string)
     }
 
     const usedNames = new Set<string>();
-    peers.forEach((peer, index) => {
+    for (const peer of peers) {
+        if (!peer.publicKey) {
+            summary.skippedPeers.push(peer.name || "(no PublicKey)");
+            continue;
+        }
         let name = peer.name ? sanitizeHostName(peer.name) : "";
         if (!name || usedNames.has(name))
-            name = unusedFallbackName(interfaceName, index + 1, usedNames);
+            name = publicKeyFallbackName(interfaceName, peer.publicKey, usedNames);
         const addresses = [...new Set(peer.allowedAddresses
                 .map(address => parseAddress(address)?.text)
                 .filter((address): address is string => address !== undefined))];
@@ -119,11 +132,11 @@ export function parseWireguardConfiguration(interfaceName: string, text: string)
         const usable = addresses.filter(address => !address.endsWith("/0"));
         if (usable.length === 0) {
             summary.skippedPeers.push(peer.name || name);
-            return;
+            continue;
         }
         usedNames.add(name);
-        summary.hosts.push({ name, addresses: usable, origin: "wireguard", wireguardInterface: interfaceName });
-    });
+        summary.hosts.push({ name, addresses: usable, origin: "wireguard", wireguardInterface: interfaceName, wireguardPublicKey: peer.publicKey });
+    }
     return summary;
 }
 
@@ -131,9 +144,17 @@ export function parseWireguardConfiguration(interfaceName: string, text: string)
  * Merges imported hosts into an existing host list. Hosts previously imported
  * from the same interface are replaced; manual hosts with the same name win
  * and are reported as conflicts.
+ * @returns also `removed`: earlier imports whose name is gone (rules naming them
+ * fail validation until edited), and `reassigned`: names now held by a different
+ * peer than before, or by any peer when the earlier import stored no PublicKey.
  */
-export function mergeImportedHosts(existing: HostEntry[], summary: WireguardInterfaceSummary): { hosts: HostEntry[]; conflicts: string[] } {
-    const kept = existing.filter(host => !(host.origin === "wireguard" && host.wireguardInterface === summary.interfaceName));
+export function mergeImportedHosts(existing: HostEntry[], summary: WireguardInterfaceSummary): { hosts: HostEntry[]; conflicts: string[]; removed: string[]; reassigned: string[] } {
+    const isPreviousImport = (host: HostEntry) => host.origin === "wireguard" && host.wireguardInterface === summary.interfaceName;
+    const previousImports = existing.filter(isPreviousImport);
+    const removed = previousImports.filter(previous => !summary.hosts.some(imported => imported.name === previous.name)).map(previous => previous.name);
+    const reassigned = previousImports.filter(previous => summary.hosts.some(imported => imported.name === previous.name && imported.wireguardPublicKey !== previous.wireguardPublicKey))
+            .map(previous => previous.name);
+    const kept = existing.filter(host => !isPreviousImport(host));
     const conflicts: string[] = [];
     const hosts = [...kept];
     for (const imported of summary.hosts) {
@@ -143,5 +164,5 @@ export function mergeImportedHosts(existing: HostEntry[], summary: WireguardInte
         }
         hosts.push(imported);
     }
-    return { hosts, conflicts };
+    return { hosts, conflicts, removed, reassigned };
 }

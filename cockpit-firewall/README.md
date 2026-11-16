@@ -16,7 +16,7 @@ WireGuard files. Use it instead of loading firewall rules from WireGuard
 - **Forward rules**: ordered `from zone[/host] -> to zone[/host]`, service, accept/drop; established/related traffic is always accepted
 - **NAT**: masquerade an IPv4 source CIDR (and/or zone) out of an egress zone
 - **Input rules**: what may reach the host itself; SSH (22) and Cockpit (9090) stay reachable unless explicitly disabled (with a warning)
-- **WireGuard import (read-only)**: peers from `/etc/wireguard/*.conf` become hosts, named from the `# Name =` comment, addressed from `AllowedIPs`
+- **WireGuard import (read-only)**: peers from `/etc/wireguard/*.conf` become hosts, named from the `# Name =` comment (unnamed peers: `<interface>-peer-<PublicKey prefix>`), addressed from `AllowedIPs`; re-imports list hosts removed or now held by a different peer
 - **Safe apply**: validate, preview diff, atomic apply, automatic rollback after 60 s unless confirmed
 - **Coexistence**: other nftables tables (firewalld, docker, ...) are listed read-only, with warnings; running firewalld/ufw is detected
 - **IP forwarding**: `net.ipv4.ip_forward=1` is set (and persisted in `/etc/sysctl.d/90-cockpit-firewall.conf`) when any forward or NAT rule exists
@@ -91,7 +91,8 @@ nftables is restarted or reloaded. It is enabled when a change is confirmed.
 2. **Status & apply** shows a diff against the persisted ruleset.
 3. Click **Apply**: the server checks the ruleset with `nft -c -f`, snapshots the app's current tables, arms a rollback
    (`systemd-run --on-active=60`, transient unit `cockpit-firewall-rollback`, or a
-   detached `sleep` fallback), then loads the new ruleset with `nft -f`.
+   detached `sleep` fallback), then loads the new ruleset with `nft -f`. `ip_forward` is enabled only
+   after the ruleset has loaded.
 4. Click **Keep changes** within 60 s to persist the ruleset, the sysctl file and the
    boot unit. Otherwise the previous tables and `ip_forward` value are restored
    server-side, even if the browser has lost its connection.

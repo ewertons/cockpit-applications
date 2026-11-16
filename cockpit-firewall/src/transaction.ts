@@ -160,12 +160,13 @@ export function applyScriptText(enableForwarding: boolean): string {
         `    setsid /bin/sh -c 'sleep ${ROLLBACK_TIMEOUT_SECONDS}; exec /bin/sh "$0" "$1"' "$state_directory/rollback.sh" "$token" </dev/null >/dev/null 2>&1 9>&- &`,
         "fi",
         `touch "$state_directory/armed"`,
-        ...enableForwarding ? ["echo 1 > /proc/sys/net/ipv4/ip_forward"] : [],
         `if ! nft -f "$state_directory/pending.nft"; then`,
         `    ${RUN_ROLLBACK_NOW} || true`,
         `    systemctl stop "$rollback_unit.timer" 2>/dev/null || true`,
         `    exit ${ExitCode.applyFailed}`,
         "fi",
+        // Only once the new filter is in place, so nothing is routed unfiltered.
+        ...enableForwarding ? ["echo 1 > /proc/sys/net/ipv4/ip_forward"] : [],
         "",
     ].join("\n");
 }

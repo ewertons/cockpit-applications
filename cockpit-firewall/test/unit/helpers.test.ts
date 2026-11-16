@@ -26,7 +26,7 @@ PublicKey = a
 AllowedIPs = 10.99.0.3/32, fd10::3/128
 
 [Peer]
-PublicKey = b
+PublicKey = bKey+/xyz123=
 AllowedIPs = 10.99.0.4/32
 
 [Peer]
@@ -45,29 +45,55 @@ AllowedIPs = 0.0.0.0/0
         assert.equal(summary.listenPort, 51820);
         assert.deepEqual(summary.networks, ["10.99.0.0/24"]);
         assert.deepEqual(summary.hosts, [
-            { name: "vpn-laptop", addresses: ["10.99.0.3", "fd10::3"], origin: "wireguard", wireguardInterface: "wg0" },
-            { name: "wg0-peer-2", addresses: ["10.99.0.4"], origin: "wireguard", wireguardInterface: "wg0" },
-            { name: "My-Phone-old", addresses: ["10.99.0.5"], origin: "wireguard", wireguardInterface: "wg0" },
+            { name: "vpn-laptop", addresses: ["10.99.0.3", "fd10::3"], origin: "wireguard", wireguardInterface: "wg0", wireguardPublicKey: "a" },
+            { name: "wg0-peer-bKeyxyz1", addresses: ["10.99.0.4"], origin: "wireguard", wireguardInterface: "wg0", wireguardPublicKey: "bKey+/xyz123=" },
+            { name: "My-Phone-old", addresses: ["10.99.0.5"], origin: "wireguard", wireguardInterface: "wg0", wireguardPublicKey: "c" },
         ]);
         assert.deepEqual(summary.skippedPeers, ["upstream"]);
     });
 
     test("skips peers routing everything, however /0 is spelled", () => {
-        const summary = parseWireguardConfiguration("wg0", "[Peer]\n# Name = gw6\nAllowedIPs = 0::/0, 0:0:0:0:0:0:0:0/0\n[Peer]\n# Name = gw4\nAllowedIPs = 0.0.0.0/0\n");
+        const summary = parseWireguardConfiguration("wg0", "[Peer]\n# Name = gw6\nPublicKey = g6\nAllowedIPs = 0::/0, 0:0:0:0:0:0:0:0/0\n[Peer]\n# Name = gw4\nPublicKey = g4\nAllowedIPs = 0.0.0.0/0\n");
         assert.deepEqual(summary.hosts, []);
         assert.deepEqual(summary.skippedPeers, ["gw6", "gw4"]);
     });
 
     test("ignores inline comments", () => {
-        const summary = parseWireguardConfiguration("wg0", "[Interface]\nListenPort = 51820 # VPN\nAddress = 10.99.0.1/24 # hub\n[Peer]\n# Name = phone\nAllowedIPs = 10.99.0.3/32 # phone\n");
+        const summary = parseWireguardConfiguration("wg0", "[Interface]\nListenPort = 51820 # VPN\nAddress = 10.99.0.1/24 # hub\n[Peer] # laptop\nPublicKey = l\nAllowedIPs = 10.99.0.2/32\n[Peer]   # phone\n# Name = phone\nPublicKey = p # key\nAllowedIPs = 10.99.0.3/32 # phone\n");
         assert.equal(summary.listenPort, 51820);
         assert.deepEqual(summary.networks, ["10.99.0.0/24"]);
-        assert.deepEqual(summary.hosts.map(host => [host.name, host.addresses]), [["phone", ["10.99.0.3"]]]);
+        assert.deepEqual(summary.hosts.map(host => [host.name, host.addresses]), [["wg0-peer-l", ["10.99.0.2"]], ["phone", ["10.99.0.3"]]]);
+        assert.equal(summary.hosts[1].wireguardPublicKey, "p");
     });
 
-    test("fallback names never collide with earlier peers", () => {
-        const summary = parseWireguardConfiguration("wg0", "[Peer]\n# Name = wg0-peer-2\nAllowedIPs = 10.99.0.7/32\n[Peer]\nAllowedIPs = 10.99.0.8/32\n[Peer]\n# Name = wg0-peer-2\nAllowedIPs = 10.99.0.9/32\n");
-        assert.deepEqual(summary.hosts.map(host => host.name), ["wg0-peer-2", "wg0-peer-3", "wg0-peer-4"]);
+    test("fallback names follow the PublicKey, not the position", () => {
+        const both = parseWireguardConfiguration("wg0", "[Peer]\nPublicKey = first\nAllowedIPs = 10.99.0.7/32\n[Peer]\nPublicKey = second\nAllowedIPs = 10.99.0.8/32\n");
+        const secondOnly = parseWireguardConfiguration("wg0", "[Peer]\nPublicKey = second\nAllowedIPs = 10.99.0.8/32\n");
+        assert.deepEqual(both.hosts.map(host => host.name), ["wg0-peer-first", "wg0-peer-second"]);
+        assert.deepEqual(secondOnly.hosts.map(host => [host.name, host.addresses]), [["wg0-peer-second", ["10.99.0.8"]]]);
+        const merged = mergeImportedHosts(both.hosts, secondOnly);
+        assert.deepEqual(merged.removed, ["wg0-peer-first"]);
+        assert.deepEqual(merged.reassigned, []);
+    });
+
+    test("fallback names never collide; peers without PublicKey are skipped", () => {
+        const summary = parseWireguardConfiguration("wg0", "[Peer]\n# Name = wg0-peer-k\nPublicKey = j\nAllowedIPs = 10.99.0.7/32\n[Peer]\nPublicKey = k\nAllowedIPs = 10.99.0.8/32\n[Peer]\n# Name = keyless\nAllowedIPs = 10.99.0.9/32\n");
+        assert.deepEqual(summary.hosts.map(host => host.name), ["wg0-peer-k", "wg0-peer-k-2"]);
+        assert.deepEqual(summary.skippedPeers, ["keyless"]);
+    });
+
+    test("merge reports names now held by another peer or by an import without a stored key", () => {
+        const summary = parseWireguardConfiguration("wg0", "[Peer]\n# Name = laptop\nPublicKey = new\nAllowedIPs = 10.99.0.7/32\n[Peer]\n# Name = phone\nPublicKey = same\nAllowedIPs = 10.99.0.8/32\n");
+        const existing = [
+            { name: "laptop", addresses: ["10.99.0.7"], origin: "wireguard" as const, wireguardInterface: "wg0", wireguardPublicKey: "old" },
+            { name: "phone", addresses: ["10.99.0.8"], origin: "wireguard" as const, wireguardInterface: "wg0", wireguardPublicKey: "same" },
+            { name: "wg0-peer-1", addresses: ["10.99.0.9"], origin: "wireguard" as const, wireguardInterface: "wg0" },
+        ];
+        const merged = mergeImportedHosts(existing, summary);
+        assert.deepEqual(merged.reassigned, ["laptop"]);
+        assert.deepEqual(merged.removed, ["wg0-peer-1"]);
+        const legacy = mergeImportedHosts([{ name: "phone", addresses: [], origin: "wireguard" as const, wireguardInterface: "wg0" }], summary);
+        assert.deepEqual(legacy.reassigned, ["phone"]);
     });
 
     test("sanitizes hostile names", () => {
@@ -88,7 +114,7 @@ AllowedIPs = 0.0.0.0/0
         ];
         const { hosts, conflicts } = mergeImportedHosts(existing, summary);
         assert.deepEqual(conflicts, ["vpn-laptop"]);
-        assert.deepEqual(hosts.map(host => host.name), ["vpn-laptop", "wg0-peer-2", "My-Phone-old"]);
+        assert.deepEqual(hosts.map(host => host.name), ["vpn-laptop", "wg0-peer-bKeyxyz1", "My-Phone-old"]);
         assert.equal(hosts[0].origin, "manual");
     });
 });
@@ -123,13 +149,13 @@ describe("validation helpers", () => {
 describe("transaction scripts", () => {
     const apply = applyScriptText(true);
 
-    test("apply checks before snapshotting, arms rollback before loading", () => {
+    test("apply checks before snapshotting, arms rollback before loading, forwards only after loading", () => {
         const order = [
             'nft -c -f "$state_directory/pending.nft"',
             "nft list table inet cockpit_fw",
             "systemd-run --quiet",
-            "echo 1 > /proc/sys/net/ipv4/ip_forward",
             'if ! nft -f "$state_directory/pending.nft"',
+            "exit 5\nfi\necho 1 > /proc/sys/net/ipv4/ip_forward",
         ].map(fragment => apply.indexOf(fragment));
         assert.ok(order.every(index => index >= 0), String(order));
         assert.deepEqual([...order].sort((first, second) => first - second), order);
