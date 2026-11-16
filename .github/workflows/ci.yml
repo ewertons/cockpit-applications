@@ -12,7 +12,7 @@ jobs:
     strategy:
       matrix:
         app: [cockpit-git-server, cockpit-backup, cockpit-security, cockpit-openssh, cockpit-wireguard, cockpit-firewall]
-        node-version: [20, 22]
+        node-version: [22, 24]
     defaults:
       run:
         working-directory: ${{ matrix.app }}
@@ -29,7 +29,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y make gettext
 
       - name: Install npm dependencies
-        run: npm install --ignore-scripts
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --ignore-scripts
+          else
+            npm install --ignore-scripts
+          fi
 
       - name: Fetch Cockpit build libraries
         run: make pkg/lib/cockpit-po-plugin.js
@@ -54,9 +59,8 @@ jobs:
   unit-test:
     runs-on: ubuntu-24.04
     strategy:
-      fail-fast: false
       matrix:
-        app: [cockpit-git-server, cockpit-firewall]
+        app: [cockpit-git-server, cockpit-backup, cockpit-security, cockpit-firewall]
     defaults:
       run:
         working-directory: ${{ matrix.app }}
@@ -70,7 +74,12 @@ jobs:
           node-version: 22
 
       - name: Install npm dependencies
-        run: npm install --ignore-scripts
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --ignore-scripts
+          else
+            npm install --ignore-scripts
+          fi
 
       - name: Unit tests
         run: npm test
@@ -93,7 +102,12 @@ jobs:
           node-version: 22
 
       - name: Install npm dependencies
-        run: npm install --ignore-scripts
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --ignore-scripts
+          else
+            npm install --ignore-scripts
+          fi
 
       - name: ESLint
         run: npm run eslint
