@@ -144,11 +144,15 @@ export const NtopngPage = () => {
         } catch { /* no config yet */ }
     };
 
+    const writeInstances = async (newInstances: NtopngInstance[]) => {
+        await cockpit.file(CONFIG_FILE, { superuser: "require" })
+                .replace(JSON.stringify({ instances: newInstances }, null, 2));
+        setInstances(newInstances);
+    };
+
     const saveConfig = async (newInstances: NtopngInstance[]) => {
         try {
-            await cockpit.file(CONFIG_FILE, { superuser: "require" })
-                    .replace(JSON.stringify({ instances: newInstances }, null, 2));
-            setInstances(newInstances);
+            await writeInstances(newInstances);
         } catch (e) {
             setError(_("Cannot save configuration: ") + String(e));
         }
@@ -315,7 +319,7 @@ export const NtopngPage = () => {
     const openLocalSetup = () => {
         setSetupPassword("");
         setSetupPasswordConfirm("");
-        setSetupListenOnAllInterfaces(localLoopbackOnly === false && instances.some(i => i.id === "local"));
+        setSetupListenOnAllInterfaces(false);
         setSetupError("");
         setShowLocalSetup(true);
     };
@@ -328,18 +332,37 @@ export const NtopngPage = () => {
         }
         setSettingUpLocal(true);
         setSetupError("");
+        let passwordChanged = false;
         try {
-            const configContent = await cockpit.file(NTOPNG_CONFIG_PATH, { superuser: "require" })
-                    .modify((content: string | null) => configureListeners(content ?? "", setupListenOnAllInterfaces));
-            await cockpit.spawn(["systemctl", "enable", "ntopng"], { superuser: "require", err: "message" });
+            const configFile = cockpit.file(NTOPNG_CONFIG_PATH, { superuser: "require" });
+            const currentConfig = (await configFile.read()) ?? "";
+            if (httpPortFromConfig(configureListeners(currentConfig, false)) === 0)
+                throw new Error(cockpit.format(_("The ntopng HTTP listener is disabled (-w=0) in $0. Enable it before setting up the local instance."), NTOPNG_CONFIG_PATH));
+
+            // Set the password while ntopng only listens on loopback, then widen the listener if requested.
+            let configContent = await configFile.modify((content: string | null) => configureListeners(content ?? "", false));
             await cockpit.spawn(["systemctl", "restart", "ntopng"], { superuser: "require", err: "message" });
             setLocalRunning(true);
+            try {
+                const passwordProcess = cockpit.spawn(["sh", "-c", SET_ADMIN_PASSWORD_SCRIPT], { superuser: "require", err: "message" });
+                passwordProcess.input(setupPassword);
+                await passwordProcess;
+            } catch (passwordError) {
+                await cockpit.spawn(["systemctl", "stop", "ntopng"], { superuser: "require", err: "ignore" }).catch(() => undefined);
+                setLocalRunning(false);
+                throw passwordError;
+            }
+            passwordChanged = true;
 
-            const passwordProcess = cockpit.spawn(["sh", "-c", SET_ADMIN_PASSWORD_SCRIPT], { superuser: "require", err: "message" });
-            passwordProcess.input(setupPassword);
-            await passwordProcess;
+            if (setupListenOnAllInterfaces) {
+                configContent = await configFile.modify((content: string | null) => configureListeners(content ?? "", true));
+                await cockpit.spawn(["systemctl", "restart", "ntopng"], { superuser: "require", err: "message" });
+            }
+            await cockpit.spawn(["systemctl", "enable", "ntopng"], { superuser: "require", err: "message" });
+            setLocalLoopbackOnly(listenersAreLoopbackOnly(configContent));
 
             const port = httpPortFromConfig(configContent);
+            setLocalHttpPort(port);
             const localInstance: NtopngInstance = {
                 id: "local",
                 url: `http://127.0.0.1:${port}`,
@@ -348,15 +371,16 @@ export const NtopngPage = () => {
                 isLocal: true,
                 label: "Local",
             };
-            await saveConfig([localInstance, ...instances.filter(i => i.id !== "local")]);
+            await writeInstances([localInstance, ...instances.filter(i => i.id !== "local")]);
             setActiveInstance(localInstance);
-            setLocalLoopbackOnly(listenersAreLoopbackOnly(configContent));
-            setLocalHttpPort(port);
             setShowLocalSetup(false);
             setSuccess(_("ntopng configured, started and enabled"));
             setTimeout(() => testConnection(localInstance), 3000);
         } catch (e: any) {
-            setSetupError(e.message || String(e));
+            const message = e.message || String(e);
+            setSetupError(passwordChanged
+                ? cockpit.format(_("The ntopng admin password was already changed, but setup did not finish: $0"), message)
+                : message);
         }
         setSettingUpLocal(false);
     };

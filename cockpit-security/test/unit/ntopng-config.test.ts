@@ -39,6 +39,12 @@ describe("configureListeners", () => {
         assert.equal(result, "-w=3000\n");
         assert.equal(listenersAreLoopbackOnly(result), false);
     });
+
+    test("keeps a disabled HTTP listener disabled (HTTPS-only setups are refused)", () => {
+        const result = configureListeners("-w=0\n-W=3001\n", false);
+        assert.equal(result, "-w=0\n-W=127.0.0.1:3001\n");
+        assert.equal(httpPortFromConfig(result), 0);
+    });
 });
 
 describe("listenersAreLoopbackOnly", () => {
