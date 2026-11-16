@@ -75,7 +75,7 @@ export const RepositoriesPage = () => {
                         return Promise.all([
                             cockpit.spawn(["du", "-sh", dir], { superuser: "try", err: "ignore" }),
                             cockpit.spawn(["stat", "-c", "%Y", dir], { superuser: "try", err: "ignore" }),
-                            cockpit.spawn(["git", "config", "--file", `${dir}/config`, "--get", "daemon.receivepack"], { superuser: "try", err: "ignore" })
+                            cockpit.spawn(["git", "config", "--file", `${dir}/config`, "--bool", "--get", "daemon.receivepack"], { superuser: "try", err: "ignore" })
                                     .catch(() => ""),
                         ]).then(([duOut, statOut, daemonPushOut]: [string, string, string]) => ({
                             name,
@@ -153,7 +153,7 @@ export const RepositoriesPage = () => {
         setDisablingDaemonPush(repo.path);
         setError("");
 
-        cockpit.spawn(["git", "config", "--file", `${repo.path}/config`, "--unset-all", "daemon.receivepack"], { superuser: "require", err: "message" })
+        cockpit.spawn(["git", "config", "--file", `${repo.path}/config`, "--bool", "--replace-all", "daemon.receivepack", "false"], { superuser: "require", err: "message" })
                 .then(() => {
                     setDisablingDaemonPush(null);
                     loadRepos();
