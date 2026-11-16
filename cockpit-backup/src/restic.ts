@@ -266,7 +266,9 @@ export async function startBackupUnit(
 ): Promise<string> {
     const unitName = `${BACKUP_UNIT_PREFIX}-${jobId}`;
     const { env, resticArgs } = buildBackupCommand(sources, repo, passwordFile, options, envVars);
-    const environmentFile = `${ENV_DIR}/run-${jobId}`;
+    // One file per launch, so a concurrent launch cannot replace these credentials.
+    const launchId = Array.from(crypto.getRandomValues(new Uint8Array(8)), byte => byte.toString(16).padStart(2, "0")).join("");
+    const environmentFile = `${ENV_DIR}/run-${jobId}-${launchId}`;
     await writeEnvironmentFile(environmentFile, env);
 
     const cmd = [
@@ -277,11 +279,17 @@ export async function startBackupUnit(
         "--property=StandardError=journal",
         "--property=SyslogIdentifier=" + unitName,
         "--property=EnvironmentFile=" + environmentFile,
+        "--property=ExecStopPost=/bin/rm -f -- " + quoteSystemdExecArgument(environmentFile),
         "--",
         "restic", ...resticArgs,
     ];
 
-    await cockpit.spawn(cmd, { superuser: "try", err: "message" });
+    try {
+        await cockpit.spawn(cmd, { superuser: "try", err: "message" });
+    } catch (error) {
+        await cockpit.spawn(["rm", "-f", "--", environmentFile], { superuser: "try", err: "ignore" }).catch(() => undefined);
+        throw error;
+    }
     return unitName;
 }
 
