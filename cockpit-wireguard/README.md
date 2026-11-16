@@ -23,7 +23,7 @@ reload, and your configuration persists even if this extension is removed.
 
 - [Cockpit](https://cockpit-project.org/) installed and running
 - [WireGuard tools](https://www.wireguard.com/install/) (`wg`, `wg-quick`)
-- Node.js and npm (for building)
+- Node.js >= 22 and npm (for building)
 
 The installer installs `wireguard-tools` automatically if it is not already present.
 
