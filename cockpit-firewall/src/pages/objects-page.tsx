@@ -92,11 +92,13 @@ const ZonesCard = ({ configuration, onChange, setError }: ConfigurationPageProps
                         zone.name,
                         zone.interfaces.join(", "),
                         <SelectField
-                            key="forward" fieldId={`zone-forward-${index}`} label="" value={zone.forwardPolicy} choices={VERDICT_CHOICES}
+                            key="forward" fieldId={`zone-forward-${index}`} label=""
+                            ariaLabel={cockpit.format(_("Forward default for zone $0"), zone.name)} value={zone.forwardPolicy} choices={VERDICT_CHOICES}
                             onChange={value => updatePolicy(index, "forwardPolicy", value as Verdict)}
                         />,
                         <SelectField
-                            key="input" fieldId={`zone-input-${index}`} label="" value={zone.inputPolicy} choices={VERDICT_CHOICES}
+                            key="input" fieldId={`zone-input-${index}`} label=""
+                            ariaLabel={cockpit.format(_("Input default for zone $0"), zone.name)} value={zone.inputPolicy} choices={VERDICT_CHOICES}
                             onChange={value => updatePolicy(index, "inputPolicy", value as Verdict)}
                         />,
                         <Button key="remove" variant="link" isDanger onClick={() => remove(index)}>{_("Remove")}</Button>,
@@ -155,10 +157,13 @@ const HostsCard = ({ configuration, onChange, setError }: ConfigurationPageProps
         setImporting(true);
         setImportMessage(null);
         try {
-            const summaries = await importWireguardPeers();
+            const { summaries, failedInterfaces } = await importWireguardPeers();
             let hosts = configuration.hosts;
             const messages: string[] = [];
-            const listenPorts = new Set(configuration.wireguardListenPorts);
+            // Rebuilt from this scan so stale ports are dropped; kept as they were if any file could not be read.
+            const listenPorts = new Set(failedInterfaces.length ? configuration.wireguardListenPorts : []);
+            if (failedInterfaces.length)
+                messages.push(cockpit.format(_("Could not read: $0. Its peers and listen ports were left unchanged."), failedInterfaces.join(", ")));
             for (const summary of summaries) {
                 const merged = mergeImportedHosts(hosts, summary);
                 hosts = merged.hosts;
@@ -171,7 +176,7 @@ const HostsCard = ({ configuration, onChange, setError }: ConfigurationPageProps
                     messages.push(cockpit.format(_("$0: skipped, no usable AllowedIPs: $1"), summary.interfaceName, summary.skippedPeers.join(", ")));
             }
             onChange({ ...configuration, hosts, wireguardListenPorts: [...listenPorts].sort((first, second) => first - second) });
-            setImportMessage(summaries.length ? messages.join("\n") : _("No WireGuard configuration found in /etc/wireguard."));
+            setImportMessage(summaries.length || failedInterfaces.length ? messages.join("\n") : _("No WireGuard configuration found in /etc/wireguard."));
         } catch (error) {
             setError(String(error));
         }

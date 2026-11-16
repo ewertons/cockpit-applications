@@ -9,6 +9,7 @@ import {
     parseTransactionStatus,
     revertScriptText,
     rollbackScriptText,
+    statusScriptText,
 } from "../../src/transaction.ts";
 import { isValidInterfaceName, parseAddress, parseServicePorts } from "../../src/validation.ts";
 import { mergeImportedHosts, parseWireguardConfiguration, sanitizeHostName } from "../../src/wireguard-import.ts";
@@ -49,6 +50,17 @@ AllowedIPs = 0.0.0.0/0
             { name: "My-Phone-old", addresses: ["10.10.20.5"], origin: "wireguard", wireguardInterface: "wg0" },
         ]);
         assert.deepEqual(summary.skippedPeers, ["upstream"]);
+    });
+
+    test("skips peers routing everything, however /0 is spelled", () => {
+        const summary = parseWireguardConfiguration("wg0", "[Peer]\n# Name = gw6\nAllowedIPs = 0::/0, 0:0:0:0:0:0:0:0/0\n[Peer]\n# Name = gw4\nAllowedIPs = 0.0.0.0/0\n");
+        assert.deepEqual(summary.hosts, []);
+        assert.deepEqual(summary.skippedPeers, ["gw6", "gw4"]);
+    });
+
+    test("fallback names never collide with earlier peers", () => {
+        const summary = parseWireguardConfiguration("wg0", "[Peer]\n# Name = wg0-peer-2\nAllowedIPs = 10.10.20.7/32\n[Peer]\nAllowedIPs = 10.10.20.8/32\n[Peer]\n# Name = wg0-peer-2\nAllowedIPs = 10.10.20.9/32\n");
+        assert.deepEqual(summary.hosts.map(host => host.name), ["wg0-peer-2", "wg0-peer-3", "wg0-peer-4"]);
     });
 
     test("sanitizes hostile names", () => {
@@ -124,23 +136,57 @@ describe("transaction scripts", () => {
         assert.doesNotMatch(apply, /list ruleset|flush ruleset/);
     });
 
-    test("rollback and confirm race on an atomic mkdir", () => {
-        assert.match(rollbackScriptText(), /^mkdir "\/run\/cockpit-firewall\/decision" 2>\/dev\/null \|\| exit 0$/m);
-        assert.match(confirmScriptText(true), /if ! mkdir "\$state_directory\/decision"/);
-        assert.match(rollbackScriptText(), /previous-ip-forward" > \/proc\/sys\/net\/ipv4\/ip_forward/);
+    test("every script except status serializes on the transaction lock", () => {
+        for (const script of [apply, confirmScriptText(), revertScriptText(), rollbackScriptText()])
+            assert.match(script, /exec 9>"\/run\/cockpit-firewall\/lock"\n\s*flock 9/);
+        assert.doesNotMatch(statusScriptText(), /flock/);
+        // Detached rollback must not inherit the lock descriptor.
+        assert.match(apply, /systemd-run [^\n]*"\$token" 9>&-/);
+        assert.match(apply, /setsid [^\n]* 9>&- &/);
     });
 
-    test("confirm persists ruleset, sysctl and boot unit", () => {
-        const confirm = confirmScriptText(true);
-        assert.match(confirm, /install -m 600 "\$state_directory\/pending.nft" "\/etc\/nftables.d\/cockpit-fw.nft"/);
-        assert.match(confirm, /net.ipv4.ip_forward = 1/);
-        assert.match(confirm, /WantedBy=sysinit.target nftables.service/);
-        assert.match(confirm, /systemctl enable "cockpit-firewall.service"/);
-        assert.match(confirmScriptText(false), /rm -f "\/etc\/sysctl.d\/90-cockpit-firewall.conf"/);
+    test("rollback ignores a stale token and loses to an earlier decision", () => {
+        const rollback = rollbackScriptText();
+        const tokenCheck = rollback.indexOf('[ "$(cat "/run/cockpit-firewall/token" 2>/dev/null)" = "${1:-}" ] || exit 0');
+        const decision = rollback.indexOf('mkdir "/run/cockpit-firewall/decision" 2>/dev/null || exit 0');
+        assert.ok(tokenCheck > 0 && decision > tokenCheck, String([tokenCheck, decision]));
+        assert.match(rollback, /previous-ip-forward" > \/proc\/sys\/net\/ipv4\/ip_forward/);
+        assert.match(apply, /token=\$\(cat \/proc\/sys\/kernel\/random\/uuid\)/);
+    });
+
+    test("apply records whether confirm must persist forwarding", () => {
+        assert.match(apply, /echo 1 > "\$state_directory\/forwarding"/);
+        assert.match(applyScriptText(false), /echo 0 > "\$state_directory\/forwarding"/);
+        assert.match(confirmScriptText(), /if \[ "\$\(cat "\$state_directory\/forwarding" 2>\/dev\/null\)" = 1 \]/);
+    });
+
+    test("confirm persists and starts the unit before cancelling rollback", () => {
+        const confirm = confirmScriptText();
+        const order = [
+            'install -m 600 "$state_directory/pending.nft" "/etc/nftables.d/cockpit-fw.nft.new"',
+            "net.ipv4.ip_forward = 1",
+            "WantedBy=sysinit.target nftables.service",
+            'systemctl enable "cockpit-firewall.service"',
+            'systemctl start "cockpit-firewall.service"',
+            'mkdir "$state_directory/decision"',
+            'systemctl stop "$rollback_unit.timer"',
+            'rm -f "$state_directory/armed"',
+        ].map(fragment => confirm.indexOf(fragment));
+        assert.ok(order.every(index => index >= 0), String(order));
+        assert.deepEqual([...order].sort((first, second) => first - second), order);
+    });
+
+    test("failed persistence restores previous files and keeps the change pending", () => {
+        const confirm = confirmScriptText();
+        const failure = confirm.slice(confirm.indexOf("if ! persist; then"), confirm.indexOf('mkdir "$state_directory/decision"'));
+        assert.match(failure, /restore_previous_files/);
+        assert.match(failure, /exit 8/);
+        assert.doesNotMatch(failure, /armed|decision/);
+        assert.match(confirm, /cp -p "\/etc\/nftables.d\/cockpit-fw.nft" "\$state_directory\/backup"\/cockpit-fw.nft/);
     });
 
     test("revert runs rollback immediately", () => {
-        assert.match(revertScriptText(), /\/bin\/sh "\$state_directory\/rollback.sh"/);
+        assert.match(revertScriptText(), /COCKPIT_FIREWALL_LOCK_HELD=1 \/bin\/sh "\$state_directory\/rollback.sh" "\$\(cat "\$state_directory\/token"\)"/);
     });
 
     test("status parsing", () => {

@@ -22,7 +22,7 @@ import {
     readTransactionStatus,
     revertRuleset,
 } from '../firewall-backend.js';
-import { FirewallConfiguration, requiresForwarding } from '../model.js';
+import { FirewallConfiguration, INET_TABLE_NAME, NAT_TABLE_NAME, requiresForwarding } from '../model.js';
 import { ConfigurationError, GeneratedRuleset, generateRuleset } from '../ruleset.js';
 import { diffLines } from '../text-diff.js';
 import { PERSISTED_RULESET_PATH, SYSCTL_PATH, TransactionStatus } from '../transaction.js';
@@ -57,6 +57,12 @@ const DiffView = ({ before, after }: { before: string; after: string }) => (
         ))}
     </pre>
 );
+
+/** @returns whether every table of this app that the ruleset defines is currently loaded. */
+function ownTablesLoaded(rulesetText: string, liveTables: string): boolean {
+    return [`table inet ${INET_TABLE_NAME}`, `table ip ${NAT_TABLE_NAME}`]
+            .every(table => !rulesetText.includes(`${table} {`) || liveTables.includes(`${table} {`));
+}
 
 export const ApplyPage = ({ configuration }: { configuration: FirewallConfiguration }) => {
     const [hostState, setHostState] = useState<HostState | null>(null);
@@ -118,11 +124,12 @@ export const ApplyPage = ({ configuration }: { configuration: FirewallConfigurat
     };
 
     const apply = () => ruleset && run(() => applyRuleset(ruleset.text, forwardingNeeded), null);
-    const confirm = () => run(() => confirmRuleset(forwardingNeeded),
+    const confirm = () => run(confirmRuleset,
                               cockpit.format(_("Changes kept and saved to $0. They are loaded at boot."), PERSISTED_RULESET_PATH));
     const revert = () => run(revertRuleset, _("Reverted to the previous rules."));
 
-    const unchanged = ruleset !== null && hostState !== null && hostState.persistedRuleset === ruleset.text;
+    const unchanged = ruleset !== null && hostState !== null && hostState.persistedRuleset === ruleset.text &&
+        ownTablesLoaded(ruleset.text, hostState.liveTables);
     const transactionState = hostState?.transaction.state;
 
     return (

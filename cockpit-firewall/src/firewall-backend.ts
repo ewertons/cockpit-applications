@@ -76,9 +76,9 @@ export async function applyRuleset(rulesetText: string, enableForwarding: boolea
 }
 
 /** Keeps the applied ruleset and persists it for boot. */
-export async function confirmRuleset(persistForwarding: boolean): Promise<void> {
+export async function confirmRuleset(): Promise<void> {
     try {
-        await cockpit.script(confirmScriptText(persistForwarding), [], { superuser: "require", err: "message" });
+        await cockpit.script(confirmScriptText(), [], { superuser: "require", err: "message" });
     } catch (error) {
         throw new Error(errorMessage(error));
     }
@@ -147,25 +147,41 @@ export async function listNetworkInterfaces(): Promise<string[]> {
     }
 }
 
-/** Reads every /etc/wireguard/*.conf (read-only) and returns its peers as hosts. */
-export async function importWireguardPeers(): Promise<WireguardInterfaceSummary[]> {
-    let listing = "";
+/** Result of scanning /etc/wireguard. */
+export interface WireguardScan {
+    summaries: WireguardInterfaceSummary[];
+    /** Interfaces whose configuration could not be read. */
+    failedInterfaces: string[];
+}
+
+/**
+ * Reads every /etc/wireguard/*.conf (read-only) and returns its peers as hosts.
+ * @throws Error when the directory cannot be listed.
+ */
+export async function importWireguardPeers(): Promise<WireguardScan> {
+    let listing: string;
     try {
         listing = await cockpit.spawn(["find", WIREGUARD_DIRECTORY, "-maxdepth", "1", "-type", "f", "-name", "*.conf"],
                                       { superuser: "try", err: "message" });
-    } catch {
-        return [];
+    } catch (error) {
+        if (error && typeof error === "object" && "exit_status" in error && /No such file/.test(errorMessage(error)))
+            return { summaries: [], failedInterfaces: [] };
+        throw new Error(cockpit.format("Cannot list $0: $1", WIREGUARD_DIRECTORY, errorMessage(error)));
     }
     const summaries: WireguardInterfaceSummary[] = [];
+    const failedInterfaces: string[] = [];
     for (const path of listing.split("\n").map(line => line.trim())
             .filter(Boolean)
             .sort()) {
         const interfaceName = path.slice(WIREGUARD_DIRECTORY.length + 1, -".conf".length);
         if (!isValidInterfaceName(interfaceName) || interfaceName.endsWith("*"))
             continue;
-        const text = await cockpit.file(path, { superuser: "try" }).read();
-        if (text)
-            summaries.push(parseWireguardConfiguration(interfaceName, text));
+        try {
+            const text = await cockpit.file(path, { superuser: "try" }).read();
+            summaries.push(parseWireguardConfiguration(interfaceName, text ?? ""));
+        } catch {
+            failedInterfaces.push(interfaceName);
+        }
     }
-    return summaries;
+    return { summaries, failedInterfaces };
 }

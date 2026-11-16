@@ -40,15 +40,17 @@ export interface SelectChoice {
 }
 
 /** Labelled select. */
-export const SelectField = ({ label, value, choices, onChange, fieldId }: {
+export const SelectField = ({ label, value, choices, onChange, fieldId, ariaLabel }: {
     label: string;
+    /** Accessible name when the visible label is empty (e.g. inside table rows). */
+    ariaLabel?: string;
     value: string;
     choices: SelectChoice[];
     onChange: (value: string) => void;
     fieldId: string;
 }) => (
     <FormGroup label={label} fieldId={fieldId}>
-        <FormSelect id={fieldId} value={value} onChange={(_event, selected) => onChange(selected)}>
+        <FormSelect id={fieldId} aria-label={ariaLabel} value={value} onChange={(_event, selected) => onChange(selected)}>
             {choices.map(choice => <FormSelectOption key={choice.value} value={choice.value} label={choice.label} />)}
         </FormSelect>
     </FormGroup>
