@@ -11,9 +11,12 @@ import { TextInput } from "@patternfly/react-core/dist/esm/components/TextInput/
 import cockpit from 'cockpit';
 
 import { ClientConfigView, sanitizeFileName } from './client-config-view.jsx';
+import { ExtraRoutesField } from './extra-routes-field.jsx';
 import {
     WgInterface, WgPeer, buildClientConfig, genKeypair, genPresharedKey,
-    saveInterface, applyLive, serverSubnetCidr, resolveClientEndpoint,
+    saveInterface, applyLive, resolveClientEndpoint, browserEndpointHost,
+    endpointHost, isLoopbackHost, parseExtraRouteList, clientAllowedIpsFor,
+    extraRoutesOf, isFullTunnelPeer, isClientAddressInUse,
 } from './wireguard.js';
 
 const _ = cockpit.gettext;
@@ -30,8 +33,10 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
 
     const [name, setName] = useState(peer.name || "");
     const [clientIp, setClientIp] = useState(peer.allowedIps[0]?.split("/")[0] || "");
-    const [fullTunnel, setFullTunnel] = useState(
-        peer.clientAllowedIps ? peer.clientAllowedIps.includes("0.0.0.0/0") : true);
+    // Clients added outside the dashboard have no recorded mode: default to
+    // split tunnel so saving never silently records full tunnel.
+    const [fullTunnel, setFullTunnel] = useState(isFullTunnelPeer(peer));
+    const [extraRoutesText, setExtraRoutesText] = useState(() => extraRoutesOf(iface, peer).join("\n"));
     const [usePsk, setUsePsk] = useState(!!peer.presharedKey);
     const [psk, setPsk] = useState<string | undefined>(peer.presharedKey);
     const [keys, setKeys] = useState<{ privateKey: string; publicKey: string } | null>(
@@ -40,29 +45,49 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
 
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [warning, setWarning] = useState<string | null>(null);
     const [saved, setSaved] = useState(false);
 
-    const defaultEndpoint = resolveClientEndpoint(iface.publicEndpoint, window.location.hostname, iface.listenPort);
+    const browserHost = browserEndpointHost();
+    const defaultEndpoint = resolveClientEndpoint(iface.publicEndpoint, browserHost, iface.listenPort);
+    const overrideText = endpointOverride.trim();
+    const overrideIsLoopback = !!overrideText && isLoopbackHost(endpointHost(overrideText));
+    const endpoint = overrideIsLoopback
+        ? null
+        : resolveClientEndpoint(overrideText || iface.publicEndpoint, browserHost, iface.listenPort);
+    const endpointError = overrideIsLoopback
+        ? _("Clients cannot reach a loopback address. Enter the public host or IP of this server.")
+        : !endpoint
+            ? _("No public endpoint is set for this tunnel. Enter the public host or IP clients use to reach this server (add :port if your router forwards another port), or set it in the tunnel settings.")
+            : null;
 
-    const ipValid = /^\d{1,3}(\.\d{1,3}){3}$/.test(clientIp.trim()) &&
+    const ipFormatValid = /^\d{1,3}(\.\d{1,3}){3}$/.test(clientIp.trim()) &&
         clientIp.trim().split(".")
                 .every(o => parseInt(o, 10) <= 255);
+    // originalPubKey tracks this peer's key in iface across saves and key changes.
+    const ipInUse = ipFormatValid && isClientAddressInUse(iface, clientIp, originalPubKey);
+    const ipValid = ipFormatValid && !ipInUse;
     const nameValid = name.trim().length > 0;
+    const extraRoutes = useMemo(() => parseExtraRouteList(extraRoutesText), [extraRoutesText]);
+    const extraRoutesErrors = fullTunnel ? [] : extraRoutes.errors;
+    const clientAllowedIps = clientAllowedIpsFor(iface, fullTunnel, extraRoutes.routes);
+    // An endpoint is only needed to show a client config, i.e. when keys are known.
+    const endpointBlocksSave = overrideIsLoopback || (!endpoint && !!keys);
 
     const config = useMemo(() => {
-        if (!keys || !iface.publicKey || !ipValid)
+        if (!keys || !iface.publicKey || !ipValid || !endpoint)
             return null;
         return buildClientConfig({
             clientPrivateKey: keys.privateKey,
             clientAddress: `${clientIp.trim()}/32`,
             serverPublicKey: iface.publicKey,
             presharedKey: usePsk ? psk : undefined,
-            endpoint: resolveClientEndpoint(endpointOverride.trim() || iface.publicEndpoint, window.location.hostname, iface.listenPort),
+            endpoint,
             dns: iface.clientDns,
-            allowedIps: fullTunnel ? "0.0.0.0/0, ::/0" : serverSubnetCidr(iface),
+            allowedIps: clientAllowedIps,
             persistentKeepalive: 25,
         });
-    }, [keys, iface, clientIp, ipValid, usePsk, psk, fullTunnel, endpointOverride]);
+    }, [keys, iface, clientIp, ipValid, usePsk, psk, endpoint, clientAllowedIps]);
 
     const regenerateKeys = async () => {
         setBusy(true);
@@ -79,6 +104,7 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
     const save = async () => {
         setBusy(true);
         setError(null);
+        setWarning(null);
         try {
             let finalPsk = psk;
             if (usePsk && !finalPsk)
@@ -94,8 +120,8 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
                 privateKey: keys?.privateKey,
                 presharedKey: finalPsk,
                 allowedIps: [`${clientIp.trim()}/32`],
-                clientAllowedIps: fullTunnel ? "0.0.0.0/0, ::/0" : serverSubnetCidr(iface),
-                clientEndpoint: endpointOverride.trim() || undefined,
+                clientAllowedIps,
+                clientEndpoint: overrideText || undefined,
             };
 
             const updatedIface: WgInterface = {
@@ -105,7 +131,12 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
 
             await saveInterface(updatedIface);
             if (iface.up) {
-                try { await applyLive(iface.name) } catch { /* applied on next restart */ }
+                try {
+                    await applyLive(iface.name);
+                } catch (e: unknown) {
+                    setWarning(cockpit.format(_("Saved, but the running tunnel could not be updated ($0). Restart the tunnel to apply the changes."),
+                                              e instanceof Error ? e.message : String(e)));
+                }
             }
             setOriginalPubKey(updatedPeer.publicKey);
             setSaved(true);
@@ -121,6 +152,7 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
             <ModalHeader title={cockpit.format(_("Client: $0"), peer.name || _("(unnamed)"))} />
             <ModalBody>
                 {error && <Alert variant="danger" title={_("Error")} isInline style={{ marginBottom: "1rem" }}>{error}</Alert>}
+                {warning && <Alert variant="warning" title={warning} isInline style={{ marginBottom: "1rem" }} />}
                 {saved && (
                     <Alert
                         variant="success" title={_("Changes saved.")} isInline
@@ -144,17 +176,26 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
                             validated={ipValid ? "default" : "error"}
                             placeholder="10.8.0.2"
                         />
+                        {ipInUse && (
+                            <HelperText>
+                                <HelperTextItem variant="error">{_("Another client already uses this address.")}</HelperTextItem>
+                            </HelperText>
+                        )}
                     </FormGroup>
 
                     <FormGroup label={_("Endpoint")} fieldId="edit-client-endpoint">
                         <TextInput
                             id="edit-client-endpoint" value={endpointOverride}
                             onChange={(_ev, v) => { setEndpointOverride(v); setSaved(false) }}
-                            placeholder={defaultEndpoint}
+                            placeholder={defaultEndpoint || "vpn.example.com:51820"}
+                            validated={endpointBlocksSave ? "error" : "default"}
                         />
                         <HelperText>
-                            <HelperTextItem>
-                                {cockpit.format(_("Where this client connects. Leave blank to use the tunnel default ($0)."), defaultEndpoint)}
+                            <HelperTextItem variant={endpointError ? (endpointBlocksSave ? "error" : "warning") : "default"}>
+                                {endpointError ||
+                                    (defaultEndpoint
+                                        ? cockpit.format(_("Where this client connects. Leave blank to use the tunnel default ($0)."), defaultEndpoint)
+                                        : _("Where this client connects."))}
                             </HelperTextItem>
                         </HelperText>
                     </FormGroup>
@@ -165,7 +206,22 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
                             label={_("Route all of the client's traffic through the VPN (full tunnel)")}
                             isChecked={fullTunnel} onChange={(_ev, c) => { setFullTunnel(c); setSaved(false) }}
                         />
+                        {!peer.clientAllowedIps && (
+                            <HelperText>
+                                <HelperTextItem variant="warning">
+                                    {_("This client's traffic mode was not recorded (it was added outside the dashboard). Split tunnel is selected; check that it matches the client before saving.")}
+                                </HelperTextItem>
+                            </HelperText>
+                        )}
                     </FormGroup>
+
+                    {!fullTunnel && (
+                        <ExtraRoutesField
+                            id="edit-client-extra-routes" value={extraRoutesText}
+                            onChange={text => { setExtraRoutesText(text); setSaved(false) }}
+                            errors={extraRoutesErrors}
+                        />
+                    )}
 
                     <FormGroup fieldId="edit-client-psk" label={_("Security")}>
                         <Switch
@@ -178,6 +234,13 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
 
                 <Divider style={{ margin: "1.25rem 0" }} />
 
+                {keys && !config && (
+                    <HelperText>
+                        <HelperTextItem variant="warning">
+                            {_("Fix the fields above to show this client's configuration.")}
+                        </HelperTextItem>
+                    </HelperText>
+                )}
                 {config
                     ? (
                         <>
@@ -197,7 +260,7 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
                             </div>
                         </>
                     )
-                    : (
+                    : !keys && (
                         <Alert variant="info" isInline title={_("No stored configuration for this client")}>
                             <p>
                                 {_("This client was added outside the dashboard, so its private key is not stored and its original configuration cannot be shown.")}
@@ -214,7 +277,7 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
                     )}
             </ModalBody>
             <ModalFooter>
-                <Button variant="primary" onClick={save} isLoading={busy} isDisabled={busy || !nameValid || !ipValid}>
+                <Button variant="primary" onClick={save} isLoading={busy} isDisabled={busy || !nameValid || !ipValid || endpointBlocksSave || extraRoutesErrors.length > 0}>
                     {_("Save")}
                 </Button>
                 <Button variant="link" onClick={onClose}>{_("Close")}</Button>

@@ -380,20 +380,84 @@ export async function openFirewallPort(port: number): Promise<void> {
     await cockpit.spawn(["firewall-cmd", "--reload"], { superuser: "try", err: "message" });
 }
 
-// Standard masquerade rules so client traffic can be routed to the internet.
-// Executed by wg-quick via bash, so command substitution and %i expand at
-// interface up/down time.
-export function natRules(): { postUp: string[]; postDown: string[] } {
-    const egress = "$(ip -4 route list default | awk '{print $5; exit}')";
-    return {
-        postUp: [
-            `PostUp = sysctl -q -w net.ipv4.ip_forward=1`,
-            `PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT; iptables -t nat -A POSTROUTING -o ${egress} -j MASQUERADE`,
-        ],
-        postDown: [
-            `PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT; iptables -t nat -D POSTROUTING -o ${egress} -j MASQUERADE`,
-        ],
-    };
+// --- Client routes ---------------------------------------------------------
+
+const FULL_TUNNEL_ALLOWED_IPS = "0.0.0.0/0, ::/0";
+
+/** True if the client's own config routes everything through the tunnel. */
+export function isFullTunnelPeer(peer: WgPeer): boolean {
+    return !!peer.clientAllowedIps && splitList(peer.clientAllowedIps).includes("0.0.0.0/0");
+}
+
+/** True if another peer (not exceptPublicKey) already uses this client address. */
+export function isClientAddressInUse(iface: WgInterface, address: string, exceptPublicKey?: string): boolean {
+    const source = normalizeIpv4Cidr(address.trim());
+    return source !== null && iface.peers.some(peer => peer.publicKey !== exceptPublicKey &&
+        peer.allowedIps.some(allowedIp => normalizeIpv4Cidr(allowedIp) === source));
+}
+
+/**
+ * Parse one extra route: an IPv4 address or network CIDR. IPv6 is rejected
+ * because clients are only given an IPv4 tunnel address.
+ * @returns the route as a CIDR, or an error message.
+ */
+export function parseExtraRoute(text: string): { route?: string; error?: string } {
+    const trimmed = text.trim();
+    if (trimmed.includes(":"))
+        return { error: cockpit.format(_("\"$0\": only IPv4 routes are supported"), trimmed) };
+    const match = trimmed.match(/^([0-9.]+)(?:\/(\d{1,2}))?$/);
+    const address = match ? ipToInt(match[1]) : NaN;
+    const prefix = match?.[2] === undefined ? 32 : parseInt(match[2], 10);
+    if (!match || isNaN(address) || prefix > 32)
+        return { error: cockpit.format(_("\"$0\" is not a valid IPv4 address or CIDR"), trimmed) };
+    if (prefix === 0)
+        return { error: _("Use full tunnel instead of a /0 route") };
+    const network = (address & prefixMask(prefix)) >>> 0;
+    if (network !== address)
+        return { error: cockpit.format(_("\"$0\" has host bits set; did you mean $1/$2?"), trimmed, intToIp(network), prefix) };
+    return { route: `${intToIp(network)}/${prefix}` };
+}
+
+/**
+ * Parse user input (one route per line, or comma-separated) into
+ * de-duplicated CIDRs plus one message per invalid entry.
+ */
+export function parseExtraRouteList(text: string): { routes: string[]; errors: string[] } {
+    const routes: string[] = [];
+    const errors: string[] = [];
+    const items = text.split(/[\n,]/).map(item => item.trim())
+            .filter(Boolean);
+    for (const item of items) {
+        const parsed = parseExtraRoute(item);
+        if (!parsed.route)
+            errors.push(parsed.error!);
+        else if (!routes.includes(parsed.route))
+            routes.push(parsed.route);
+    }
+    return { routes, errors };
+}
+
+/**
+ * AllowedIPs for the client's own config: everything for full tunnel, else the
+ * VPN subnet plus each extra route.
+ */
+export function clientAllowedIpsFor(iface: WgInterface, fullTunnel: boolean, extraRoutes: string[]): string {
+    if (fullTunnel)
+        return FULL_TUNNEL_ALLOWED_IPS;
+    const routes = [serverSubnetCidr(iface)];
+    for (const route of extraRoutes) {
+        if (!routes.includes(route))
+            routes.push(route);
+    }
+    return routes.join(", ");
+}
+
+/** Routes a split-tunnel client has besides the VPN subnet (from `# ClientAllowedIPs`). */
+export function extraRoutesOf(iface: WgInterface, peer: WgPeer): string[] {
+    if (!peer.clientAllowedIps || isFullTunnelPeer(peer))
+        return [];
+    const vpnSubnet = serverSubnetCidr(iface);
+    return splitList(peer.clientAllowedIps).filter(route => route !== vpnSubnet);
 }
 
 // --- IP helpers ------------------------------------------------------------
@@ -404,12 +468,28 @@ function ipToInt(ip: string): number {
         return NaN;
     let n = 0;
     for (const part of parts) {
-        const o = parseInt(part, 10);
+        const o = /^\d{1,3}$/.test(part) ? parseInt(part, 10) : NaN;
         if (isNaN(o) || o < 0 || o > 255)
             return NaN;
         n = (n << 8) + o;
     }
     return n >>> 0;
+}
+
+function prefixMask(prefix: number): number {
+    return prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
+}
+
+// "a.b.c.d[/n]" to "a.b.c.d/n", or null if not IPv4.
+function normalizeIpv4Cidr(text: string): string | null {
+    const match = text.trim().match(/^([0-9.]+)(?:\/(\d{1,2}))?$/);
+    if (!match || isNaN(ipToInt(match[1])))
+        return null;
+    const prefix = match[2] === undefined ? 32 : parseInt(match[2], 10);
+    if (prefix > 32)
+        return null;
+    // Host bits are cleared, as WireGuard and iptables do.
+    return `${intToIp((ipToInt(match[1]) & prefixMask(prefix)) >>> 0)}/${prefix}`;
 }
 
 function intToIp(n: number): string {
@@ -466,15 +546,79 @@ export function endpointHasPort(ep: string): boolean {
     return /\]:\d+$/.test(ep) || /^[^:]+:\d+$/.test(ep);
 }
 
-// Build the "host:port" a client should dial. `base` may be a bare host, a
-// "host:port", or empty (in which case `fallbackHost` is used). A missing port
-// falls back to the server's listen port. This supports DDNS hostnames and
-// routers that forward an external port to the WireGuard listen port.
-export function resolveClientEndpoint(base: string | undefined, fallbackHost: string, listenPort: number | undefined): string {
-    const host = (base && base.trim()) || fallbackHost;
-    if (endpointHasPort(host))
-        return host;
-    return `${host}:${listenPort ?? 51820}`;
+// Host part of "host", "host:port", "[v6]" or "[v6]:port".
+export function endpointHost(endpoint: string): string {
+    const text = endpoint.trim();
+    const bracketed = text.match(/^\[([^\]]*)\](?::\d+)?$/);
+    if (bracketed)
+        return bracketed[1];
+    if (/^[^:]+:\d+$/.test(text))
+        return text.slice(0, text.lastIndexOf(":"));
+    return text;
+}
+
+/** True for names and addresses that only reach the local machine. */
+export function isLoopbackHost(host: string): boolean {
+    const name = host.trim().toLowerCase()
+            .replace(/^\[|\]$/g, "")
+            .replace(/\.$/, "");
+    if (name === "localhost" || name.endsWith(".localhost") || name === "localhost.localdomain" ||
+        /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(name))
+        return true;
+    const groups = expandIpv6(name);
+    if (!groups)
+        return false;
+    const leadingZeros = groups.slice(0, 5).every(group => group === 0);
+    // ::1, or an IPv4-mapped address in 127.0.0.0/8 (::ffff:7f00:1 or ::ffff:127.0.0.1).
+    return (leadingZeros && groups[5] === 0 && groups[6] === 0 && groups[7] === 1) ||
+        (leadingZeros && groups[5] === 0xffff && (groups[6] >> 8) === 127);
+}
+
+/** The eight 16-bit groups of an IPv6 address (dotted IPv4 tail allowed), or null. */
+function expandIpv6(text: string): number[] | null {
+    let address = text;
+    const dottedTail = address.match(/^(.*:)(\d{1,3}(?:\.\d{1,3}){3})$/);
+    if (dottedTail) {
+        const ipv4 = ipToInt(dottedTail[2]);
+        if (isNaN(ipv4))
+            return null;
+        address = dottedTail[1] + ((ipv4 >>> 16).toString(16)) + ":" + ((ipv4 & 0xffff).toString(16));
+    }
+    const halves = address.split("::");
+    if (halves.length > 2)
+        return null;
+    const parseGroups = (part: string) => (part === "" ? [] : part.split(":"));
+    const head = parseGroups(halves[0]);
+    const tail = halves.length === 2 ? parseGroups(halves[1]) : [];
+    if (![...head, ...tail].every(group => /^[0-9a-f]{1,4}$/.test(group)))
+        return null;
+    const missing = 8 - head.length - tail.length;
+    if (halves.length === 2 ? missing < 1 : missing !== 0)
+        return null;
+    return [...head, ...Array(missing).fill("0"), ...tail].map(group => parseInt(group, 16));
+}
+
+/** Host the browser used to reach Cockpit, or "" if it is a loopback name. */
+export function browserEndpointHost(): string {
+    const host = window.location.hostname;
+    return isLoopbackHost(host) ? "" : host;
+}
+
+/**
+ * Build the "host:port" a client should dial from the first non-empty,
+ * non-loopback candidate (`base`, then `fallbackHost`). A missing port falls
+ * back to the listen port, so DDNS names and routers that forward another
+ * external port work.
+ * @returns null when no usable host is known.
+ */
+export function resolveClientEndpoint(base: string | undefined, fallbackHost: string, listenPort: number | undefined): string | null {
+    for (const candidate of [base, fallbackHost]) {
+        const host = candidate?.trim();
+        if (!host || isLoopbackHost(endpointHost(host)))
+            continue;
+        return endpointHasPort(host) ? host : `${host}:${listenPort ?? 51820}`;
+    }
+    return null;
 }
 
 // --- Client config generation ----------------------------------------------
@@ -486,7 +630,7 @@ export interface ClientConfigParams {
     presharedKey?: string;
     endpoint: string; // "host:port"
     dns?: string;
-    allowedIps: string; // "0.0.0.0/0, ::/0" or a subnet
+    allowedIps: string; // see clientAllowedIpsFor
     persistentKeepalive?: number;
 }
 

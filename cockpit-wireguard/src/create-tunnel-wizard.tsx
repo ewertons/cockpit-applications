@@ -5,7 +5,6 @@ import { ClipboardCopy } from "@patternfly/react-core/dist/esm/components/Clipbo
 import { FormGroup } from "@patternfly/react-core/dist/esm/components/Form/index.js";
 import { HelperText, HelperTextItem } from "@patternfly/react-core/dist/esm/components/HelperText/index.js";
 import { Spinner } from "@patternfly/react-core/dist/esm/components/Spinner/index.js";
-import { Switch } from "@patternfly/react-core/dist/esm/components/Switch/index.js";
 import { TextInput } from "@patternfly/react-core/dist/esm/components/TextInput/index.js";
 
 import cockpit from 'cockpit';
@@ -13,7 +12,8 @@ import cockpit from 'cockpit';
 import { StepWizard, WizardStepDef } from './stepper.jsx';
 import {
     WgInterface, genKeypair, saveInterface, bringUp, setEnabledAtBoot,
-    firewalldActive, openFirewallPort, natRules, isValidInterfaceName,
+    firewalldActive, openFirewallPort, isValidInterfaceName, browserEndpointHost,
+    endpointHost, isLoopbackHost,
 } from './wireguard.js';
 
 const _ = cockpit.gettext;
@@ -50,9 +50,8 @@ export function CreateTunnelWizard({ existingNames, onClose, onSaved }: CreateTu
     const [name, setName] = useState(() => defaultName(existingNames));
     const [address, setAddress] = useState("10.8.0.1/24");
     const [listenPort, setListenPort] = useState("51820");
-    const [publicEndpoint, setPublicEndpoint] = useState(() => window.location.hostname);
+    const [publicEndpoint, setPublicEndpoint] = useState(browserEndpointHost);
     const [clientDns, setClientDns] = useState("1.1.1.1");
-    const [nat, setNat] = useState(true);
 
     const [keys, setKeys] = useState<{ privateKey: string; publicKey: string } | null>(null);
     const [generating, setGenerating] = useState(true);
@@ -104,6 +103,11 @@ export function CreateTunnelWizard({ existingNames, onClose, onSaved }: CreateTu
                 : null;
     const addressValid = isValidAddress(address);
     const portValid = !isNaN(port) && port >= 1 && port <= 65535;
+    const publicEndpointError = !publicEndpoint.trim()
+        ? _("Required. Enter the public host or IP clients use to reach this server.")
+        : isLoopbackHost(endpointHost(publicEndpoint))
+            ? _("Clients cannot reach a loopback address. Enter the public host or IP of this server.")
+            : null;
 
     const doCreate = async () => {
         if (!keys)
@@ -119,10 +123,6 @@ export function CreateTunnelWizard({ existingNames, onClose, onSaved }: CreateTu
             peers: [],
             extraInterfaceLines: [],
         };
-        if (nat) {
-            const rules = natRules();
-            iface.extraInterfaceLines!.push(...rules.postUp, ...rules.postDown);
-        }
 
         await saveInterface(iface);
 
@@ -188,7 +188,7 @@ export function CreateTunnelWizard({ existingNames, onClose, onSaved }: CreateTu
         {
             id: "access",
             name: _("Server & clients"),
-            canContinue: !generating && !!keys && !!publicEndpoint.trim(),
+            canContinue: !generating && !!keys && !publicEndpointError,
             content: (
                 <div className="wg-form">
                     <FormGroup label={_("Server public key")} fieldId="wg-pubkey">
@@ -215,8 +215,12 @@ export function CreateTunnelWizard({ existingNames, onClose, onSaved }: CreateTu
                         <TextInput
                             id="wg-endpoint" value={publicEndpoint} onChange={(_ev, v) => setPublicEndpoint(v)}
                             placeholder="vpn.example.com or vpn.example.com:51820"
+                            validated={publicEndpoint && publicEndpointError ? "error" : "default"}
                         />
                         <HelperText>
+                            {publicEndpointError && (
+                                <HelperTextItem variant="error">{publicEndpointError}</HelperTextItem>
+                            )}
                             <HelperTextItem>
                                 {_("The public hostname or IP clients use to reach this server — for example a DDNS name for your router. Add \":port\" if your router forwards a different external port to the listen port.")}
                             </HelperTextItem>
@@ -235,14 +239,10 @@ export function CreateTunnelWizard({ existingNames, onClose, onSaved }: CreateTu
                         </HelperText>
                     </FormGroup>
 
-                    <FormGroup fieldId="wg-nat" label={_("Routing")}>
-                        <Switch
-                            id="wg-nat" label={_("Route all client traffic through this server (full tunnel + NAT)")}
-                            isChecked={nat} onChange={(_ev, checked) => setNat(checked)}
-                        />
-                        <HelperText>
+                    <FormGroup fieldId="wg-routing" label={_("Routing")}>
+                        <HelperText id="wg-routing">
                             <HelperTextItem>
-                                {_("Adds masquerading and enables IP forwarding so clients reach the internet through this server. Turn off for split-tunnel (VPN subnet only).")}
+                                {_("This app does not set up IP forwarding or forwarding rules. For clients to reach the internet or LAN through this server, enable IP forwarding and allow (and masquerade) their traffic in this server's firewall.")}
                             </HelperTextItem>
                         </HelperText>
                     </FormGroup>
