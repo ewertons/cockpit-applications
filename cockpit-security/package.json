@@ -6,7 +6,7 @@
   "version": "1.0.0",
   "license": "LGPL-2.1",
   "engines": {
-    "node": ">= 16"
+    "node": ">= 22"
   },
   "scripts": {
     "watch": "ESBUILD_WATCH='true' ./build.js",
