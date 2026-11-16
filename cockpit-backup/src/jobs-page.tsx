@@ -320,7 +320,7 @@ function JobDialog({ job, destinations, onSave, onClose }: JobDialogProps) {
 
     const sourceList = sources.split('\n').map(s => s.trim())
             .filter(Boolean);
-    const validationError = (repository ? validateRepository(repository) : null) ||
+    const validationError = validateRepository(repository) ||
         sourceList.map(validateAbsolutePath).find(Boolean) || null;
 
     const handleSubmit = () => {

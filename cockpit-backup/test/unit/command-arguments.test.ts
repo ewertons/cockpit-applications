@@ -17,6 +17,9 @@ describe("parseSftpRepository", () => {
         assert.deepEqual(parseSftpRepository("sftp:backup@nas.local:/srv/restic"), { user: "backup", host: "nas.local" });
         assert.deepEqual(parseSftpRepository("sftp:nas:/srv/restic"), { host: "nas" });
         assert.deepEqual(parseSftpRepository("sftp:user@[fd00::1]:/srv/restic"), { user: "user", host: "fd00::1" });
+        assert.deepEqual(parseSftpRepository("sftp:backup_nas:/srv/restic"), { host: "backup_nas" });
+        assert.deepEqual(parseSftpRepository("sftp:backup@nas.example.com.:/srv/restic"), { user: "backup", host: "nas.example.com." });
+        assert.deepEqual(parseSftpRepository("sftp:backup@nas:/srv/@[archive]/restic"), { user: "backup", host: "nas" });
     });
 
     test("URL form with port", () => {
@@ -39,6 +42,7 @@ describe("parseSftpRepository", () => {
         assert.throws(() => parseSftpRepository("sftp://host:70000/repo"));
         assert.throws(() => parseSftpRepository("sftp://host:22 -oX/repo"));
         assert.throws(() => parseSftpRepository("sftp:[fd00::1/repo"));
+        assert.throws(() => parseSftpRepository("sftp:.:/repo"));
     });
 });
 

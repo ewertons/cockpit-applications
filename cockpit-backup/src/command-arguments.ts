@@ -2,8 +2,10 @@
 
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
-const HOSTNAME_LABEL = "[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?";
-const HOSTNAME = new RegExp(`^${HOSTNAME_LABEL}(?:\\.${HOSTNAME_LABEL})*$`);
+// DNS names (optionally absolute, with a trailing dot) and ssh_config Host aliases.
+const SSH_HOST = /^[A-Za-z0-9_](?:[A-Za-z0-9._-]{0,251}[A-Za-z0-9_])?\.?$/;
+// Start of an sftp: authority with a bracketed IPv6 host, optionally after user@.
+const BRACKETED_HOST_START = /^(?:[^@:/[\]]+@)?\[/;
 const IPV6_ADDRESS = /^[0-9A-Fa-f:.]+$/;
 const SSH_USER = /^[A-Za-z0-9._][A-Za-z0-9._-]*$/;
 const KEY_PATH = /^\/[A-Za-z0-9._/@+-]+$/;
@@ -44,7 +46,7 @@ function parseHostAndPort(authority: string, allowPort: boolean): SftpEndpoint {
         const colon = hostAndPort.indexOf(":");
         host = colon === -1 ? hostAndPort : hostAndPort.slice(0, colon);
         portText = colon === -1 ? undefined : hostAndPort.slice(colon + 1);
-        if (!HOSTNAME.test(host))
+        if (!SSH_HOST.test(host))
             throw new Error(`Invalid SFTP host "${host}"`);
     }
 
@@ -77,7 +79,7 @@ export function parseSftpRepository(repository: string): SftpEndpoint | null {
     if (repository.startsWith("sftp:")) {
         const rest = repository.slice("sftp:".length);
         let end: number;
-        if (rest.includes("@[") || rest.startsWith("[")) {
+        if (BRACKETED_HOST_START.test(rest)) {
             end = rest.indexOf("]") + 1;
             if (end === 0)
                 throw new Error(`Invalid SFTP host in "${repository}"`);
