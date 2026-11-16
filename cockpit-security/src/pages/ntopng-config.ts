@@ -47,6 +47,16 @@ export function httpPortFromConfig(configContent: string): number {
     return NTOPNG_DEFAULT_HTTP_PORT;
 }
 
+/** Loopback address of the HTTP listener for an SSH tunnel destination (127.0.0.1 unless another loopback address is configured). */
+export function httpLoopbackAddressFromConfig(configContent: string): string {
+    for (const line of configContent.split("\n")) {
+        const setting = parseListenerLine(line);
+        if (setting && isHttpOption(setting.option) && setting.address && LOOPBACK_ADDRESSES.includes(setting.address))
+            return setting.address;
+    }
+    return "127.0.0.1";
+}
+
 /**
  * True when every enabled web listener (HTTP and HTTPS) in ntopng.conf is bound to a loopback address.
  * A missing HTTP option means ntopng listens on all interfaces on its default port.

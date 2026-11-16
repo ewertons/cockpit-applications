@@ -8,6 +8,7 @@ import { describe, test } from "node:test";
 
 import {
     configureListeners,
+    httpLoopbackAddressFromConfig,
     httpPortFromConfig,
     listenersAreLoopbackOnly,
     redisConnectionFromConfig,
@@ -67,6 +68,15 @@ describe("listenersAreLoopbackOnly", () => {
         assert.equal(listenersAreLoopbackOnly("-w=127.0.0.1:3000"), true);
         assert.equal(listenersAreLoopbackOnly("-w=[::1]:3000\n-W=0"), true);
         assert.equal(listenersAreLoopbackOnly("-w=:3000\n-W=:3001"), true);
+    });
+});
+
+describe("httpLoopbackAddressFromConfig", () => {
+    test("keeps the configured loopback address for the tunnel destination", () => {
+        assert.equal(httpLoopbackAddressFromConfig("-w=[::1]:3000"), "[::1]");
+        assert.equal(httpLoopbackAddressFromConfig("-w=127.0.0.1:3000"), "127.0.0.1");
+        assert.equal(httpLoopbackAddressFromConfig("-w=:3000"), "127.0.0.1");
+        assert.equal(httpLoopbackAddressFromConfig(""), "127.0.0.1");
     });
 });
 
