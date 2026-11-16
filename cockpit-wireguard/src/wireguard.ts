@@ -396,30 +396,15 @@ export function isClientAddressInUse(iface: WgInterface, address: string, except
         peer.allowedIps.some(allowedIp => normalizeIpv4Cidr(allowedIp) === source));
 }
 
-// Shape check of an IPv6 address: hex groups, at most one "::", no ":::".
-function isIpv6Address(text: string): boolean {
-    const compressions = text.split("::").length - 1;
-    if (compressions > 1 || text.includes(":::"))
-        return false;
-    const groups = text.split(":");
-    return groups.every(group => /^[0-9a-f]{0,4}$/i.test(group)) &&
-        (compressions === 1 ? groups.length <= 8 : groups.length === 8 && groups.every(Boolean));
-}
-
 /**
- * Parse one extra route: an IPv4 address or network CIDR, or an IPv6 CIDR.
+ * Parse one extra route: an IPv4 address or network CIDR. IPv6 is rejected
+ * because clients are only given an IPv4 tunnel address.
  * @returns the route as a CIDR, or an error message.
  */
 export function parseExtraRoute(text: string): { route?: string; error?: string } {
     const trimmed = text.trim();
-    if (trimmed.includes(":")) {
-        const match = trimmed.match(/^([0-9a-f:]+)\/(\d{1,3})$/i);
-        if (!match || !isIpv6Address(match[1]) || parseInt(match[2], 10) > 128)
-            return { error: cockpit.format(_("\"$0\" is not a valid IPv6 CIDR"), trimmed) };
-        if (parseInt(match[2], 10) === 0)
-            return { error: _("Use full tunnel instead of a /0 route") };
-        return { route: trimmed.toLowerCase() };
-    }
+    if (trimmed.includes(":"))
+        return { error: cockpit.format(_("\"$0\": only IPv4 routes are supported"), trimmed) };
     const match = trimmed.match(/^([0-9.]+)(?:\/(\d{1,2}))?$/);
     const address = match ? ipToInt(match[1]) : NaN;
     const prefix = match?.[2] === undefined ? 32 : parseInt(match[2], 10);
@@ -577,9 +562,40 @@ export function isLoopbackHost(host: string): boolean {
     const name = host.trim().toLowerCase()
             .replace(/^\[|\]$/g, "")
             .replace(/\.$/, "");
-    return name === "localhost" || name.endsWith(".localhost") || name === "localhost.localdomain" ||
-        /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(name) || /^::ffff:127\./.test(name) ||
-        /^(0{0,4}:){2,7}0{0,3}1$/.test(name);
+    if (name === "localhost" || name.endsWith(".localhost") || name === "localhost.localdomain" ||
+        /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(name))
+        return true;
+    const groups = expandIpv6(name);
+    if (!groups)
+        return false;
+    const leadingZeros = groups.slice(0, 5).every(group => group === 0);
+    // ::1, or an IPv4-mapped address in 127.0.0.0/8 (::ffff:7f00:1 or ::ffff:127.0.0.1).
+    return (leadingZeros && groups[5] === 0 && groups[6] === 0 && groups[7] === 1) ||
+        (leadingZeros && groups[5] === 0xffff && (groups[6] >> 8) === 127);
+}
+
+/** The eight 16-bit groups of an IPv6 address (dotted IPv4 tail allowed), or null. */
+function expandIpv6(text: string): number[] | null {
+    let address = text;
+    const dottedTail = address.match(/^(.*:)(\d{1,3}(?:\.\d{1,3}){3})$/);
+    if (dottedTail) {
+        const ipv4 = ipToInt(dottedTail[2]);
+        if (isNaN(ipv4))
+            return null;
+        address = dottedTail[1] + ((ipv4 >>> 16).toString(16)) + ":" + ((ipv4 & 0xffff).toString(16));
+    }
+    const halves = address.split("::");
+    if (halves.length > 2)
+        return null;
+    const parseGroups = (part: string) => (part === "" ? [] : part.split(":"));
+    const head = parseGroups(halves[0]);
+    const tail = halves.length === 2 ? parseGroups(halves[1]) : [];
+    if (![...head, ...tail].every(group => /^[0-9a-f]{1,4}$/.test(group)))
+        return null;
+    const missing = 8 - head.length - tail.length;
+    if (halves.length === 2 ? missing < 1 : missing !== 0)
+        return null;
+    return [...head, ...Array(missing).fill("0"), ...tail].map(group => parseInt(group, 16));
 }
 
 /** Host the browser used to reach Cockpit, or "" if it is a loopback name. */
