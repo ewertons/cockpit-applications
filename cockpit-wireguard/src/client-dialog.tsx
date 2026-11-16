@@ -64,8 +64,8 @@ export function ClientDialog({ iface, peer, onClose, onSaved }: ClientDialogProp
     const ipFormatValid = /^\d{1,3}(\.\d{1,3}){3}$/.test(clientIp.trim()) &&
         clientIp.trim().split(".")
                 .every(o => parseInt(o, 10) <= 255);
-    // peer.publicKey is the key this peer has in iface, even after a key change.
-    const ipInUse = ipFormatValid && isClientAddressInUse(iface, clientIp, peer.publicKey);
+    // originalPubKey tracks this peer's key in iface across saves and key changes.
+    const ipInUse = ipFormatValid && isClientAddressInUse(iface, clientIp, originalPubKey);
     const ipValid = ipFormatValid && !ipInUse;
     const nameValid = name.trim().length > 0;
     const extraRoutes = useMemo(() => parseExtraRouteList(extraRoutesText), [extraRoutesText]);

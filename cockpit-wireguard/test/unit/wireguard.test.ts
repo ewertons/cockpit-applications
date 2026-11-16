@@ -54,8 +54,8 @@ describe("client routes", () => {
     const [phone, laptop, tablet] = iface.peers;
 
     test("split tunnel adds each extra route after the VPN subnet", () => {
-        assert.equal(clientAllowedIpsFor(iface, false, ["192.168.1.198/32", "10.10.20.0/24", "fd00::/64"]),
-                     "10.10.20.0/24, 192.168.1.198/32, fd00::/64");
+        assert.equal(clientAllowedIpsFor(iface, false, ["192.168.1.198/32", "10.10.20.0/24"]),
+                     "10.10.20.0/24, 192.168.1.198/32");
         assert.equal(clientAllowedIpsFor(iface, false, []), "10.10.20.0/24");
     });
 
@@ -86,18 +86,16 @@ describe("client routes", () => {
 });
 
 describe("extra route validation", () => {
-    test("accepts IPv4 addresses and networks, and IPv6 networks", () => {
+    test("accepts IPv4 addresses and networks", () => {
         assert.equal(parseExtraRoute("192.168.1.198").route, "192.168.1.198/32");
         assert.equal(parseExtraRoute(" 192.168.1.0/24 ").route, "192.168.1.0/24");
-        assert.equal(parseExtraRoute("FD00::/64").route, "fd00::/64");
     });
 
     test("rejects malformed routes, host bits, ports and /0", () => {
-        for (const text of ["192.168.1.300", "192.168.1.0/33", "192.168.1.198:22", "192.168.1.198:22/tcp", "host", "1.2.3", "fd00::1", "fd00::/129", "fd00:::/64"])
+        for (const text of ["192.168.1.300", "192.168.1.0/33", "192.168.1.198:22", "192.168.1.198:22/tcp", "host", "1.2.3", "fd00::/64", "fd00:1:2:3:4:5:6::/112"])
             assert.ok(parseExtraRoute(text).error, text);
         assert.match(parseExtraRoute("192.168.1.5/24").error!, /192\.168\.1\.0\/24/);
         assert.match(parseExtraRoute("0.0.0.0/0").error!, /full tunnel/);
-        assert.match(parseExtraRoute("::/0").error!, /full tunnel/);
     });
 
     test("lists are de-duplicated and report each error", () => {
@@ -109,9 +107,9 @@ describe("extra route validation", () => {
 
 describe("client endpoint", () => {
     test("loopback names are recognized", () => {
-        for (const host of ["localhost", "LOCALHOST.", "app.localhost", "127.0.0.1", "127.1.2.3", "::1", "[::1]", "0:0:0:0:0:0:0:1", "::ffff:127.0.0.1"])
+        for (const host of ["localhost", "LOCALHOST.", "app.localhost", "127.0.0.1", "127.1.2.3", "::1", "[::1]", "0:0:0:0:0:0:0:1", "::ffff:127.0.0.1", "::ffff:7f00:1", "[::ffff:7f12:3456]", "0:0:0:0:0:ffff:7f00:1"])
             assert.ok(isLoopbackHost(host), host);
-        for (const host of ["50.125.86.239", "vpn.example.com", "localhost.example.com", "128.0.0.1", "::"])
+        for (const host of ["50.125.86.239", "vpn.example.com", "localhost.example.com", "128.0.0.1", "::", "::ffff:8000:1", "::ffff:192.168.1.1", "2001:db8::1", ":::1", "1::1::1"])
             assert.ok(!isLoopbackHost(host), host);
     });
 

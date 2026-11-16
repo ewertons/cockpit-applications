@@ -29,7 +29,7 @@ The installer installs `wireguard-tools` automatically if it is not already pres
 
 ## Client routes and firewall
 
-A split-tunnel client's **extra routes** (IPv4 addresses or CIDRs, or IPv6 CIDRs)
+A split-tunnel client's **extra routes** (IPv4 addresses or CIDRs)
 are added to the `AllowedIPs` of its generated configuration, after the VPN
 subnet, and stored in the peer's `# ClientAllowedIPs` comment. Clients added
 outside the dashboard have no recorded traffic mode and are shown as split tunnel.
