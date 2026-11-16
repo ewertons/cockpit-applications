@@ -8,6 +8,7 @@ A [Cockpit](https://cockpit-project.org/) extension for managing bare Git reposi
 - **Repository detail** — branches, tags, recent commits, git config
 - **Web-based repo browsing** — commit log, file tree, file viewer, diff viewer with branch/tag selector
 - **Service management** — start/stop/restart `git-daemon.service` and `sshd.service` via systemd
+- **Read-only git daemon** — `git-daemon` serves exported repositories read-only (`--disable=receive-pack --forbid-override=receive-pack`, so a repository's `daemon.receivepack` cannot re-enable push; new repositories do not set it); push over SSH. Existing setups that allow push over `git://` are flagged with a one-click fix. Port 9418 is opened in ufw only when you confirm it on the Services page.
 - **Access control** — manage SSH public keys in `~git/.ssh/authorized_keys` with per-key `restrict`, `from=` and `expiry-time=` options, Gitolite auto-detection, and a check of the sshd settings applied to the `git` user
 - **Clone URLs** — display SSH and git:// clone URLs for each repo
 
