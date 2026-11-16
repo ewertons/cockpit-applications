@@ -58,6 +58,13 @@ AllowedIPs = 0.0.0.0/0
         assert.deepEqual(summary.skippedPeers, ["gw6", "gw4"]);
     });
 
+    test("ignores inline comments", () => {
+        const summary = parseWireguardConfiguration("wg0", "[Interface]\nListenPort = 51820 # VPN\nAddress = 10.99.0.1/24 # hub\n[Peer]\n# Name = phone\nAllowedIPs = 10.99.0.3/32 # phone\n");
+        assert.equal(summary.listenPort, 51820);
+        assert.deepEqual(summary.networks, ["10.99.0.0/24"]);
+        assert.deepEqual(summary.hosts.map(host => [host.name, host.addresses]), [["phone", ["10.99.0.3"]]]);
+    });
+
     test("fallback names never collide with earlier peers", () => {
         const summary = parseWireguardConfiguration("wg0", "[Peer]\n# Name = wg0-peer-2\nAllowedIPs = 10.99.0.7/32\n[Peer]\nAllowedIPs = 10.99.0.8/32\n[Peer]\n# Name = wg0-peer-2\nAllowedIPs = 10.99.0.9/32\n");
         assert.deepEqual(summary.hosts.map(host => host.name), ["wg0-peer-2", "wg0-peer-3", "wg0-peer-4"]);
@@ -185,12 +192,29 @@ describe("transaction scripts", () => {
         assert.match(confirm, /cp -p "\/etc\/nftables.d\/cockpit-fw.nft" "\$state_directory\/backup"\/cockpit-fw.nft/);
     });
 
+    test("rollback reports a failed restore through its exit status", () => {
+        const rollback = rollbackScriptText();
+        const failure = rollback.slice(rollback.indexOf("echo rollback-failed"));
+        assert.match(failure, /^echo rollback-failed > "[^"]+"\n\s*exit 1\n/);
+    });
+
+    test("confirm and revert act only on the change the caller reviewed", () => {
+        for (const script of [confirmScriptText(), revertScriptText()]) {
+            const check = script.indexOf('if [ "$(cat "$state_directory/token" 2>/dev/null)" != "${1:-}" ]; then');
+            assert.ok(check > script.indexOf("flock 9"), "token check runs under the lock");
+            assert.match(script.slice(check), /^[^\n]+\n[^\n]+\n\s*exit 9\n/);
+        }
+        assert.ok(confirmScriptText().indexOf("!= \"${1:-}\"") < confirmScriptText().indexOf("install -m 600"));
+    });
+
     test("revert runs rollback immediately", () => {
         assert.match(revertScriptText(), /COCKPIT_FIREWALL_LOCK_HELD=1 \/bin\/sh "\$state_directory\/rollback.sh" "\$\(cat "\$state_directory\/token"\)"/);
     });
 
     test("status parsing", () => {
-        assert.deepEqual(parseTransactionStatus("pending 42\n"), { state: "pending", secondsLeft: 42 });
+        const token = "0f8fad5b-d9cb-469f-a165-70867728950e";
+        assert.deepEqual(parseTransactionStatus(`pending 42 ${token}\n`), { state: "pending", secondsLeft: 42, token });
+        assert.deepEqual(parseTransactionStatus("pending 42 $(reboot)"), { state: "none" });
         assert.deepEqual(parseTransactionStatus("rolled-back"), { state: "rolled-back" });
         assert.deepEqual(parseTransactionStatus("garbage"), { state: "none" });
     });
