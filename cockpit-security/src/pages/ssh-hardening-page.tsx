@@ -8,6 +8,8 @@ import { DescriptionList, DescriptionListGroup, DescriptionListTerm, Description
 
 import cockpit from 'cockpit';
 
+import { REPLACE_SSHD_CONFIG_SCRIPT, TEST_SSHD_CONFIG_SCRIPT } from './command-arguments.js';
+
 const _ = cockpit.gettext;
 
 interface SSHConfig {
@@ -73,6 +75,10 @@ export const SSHHardeningPage = () => {
         });
     };
 
+    // sshd -t checks the new file before it replaces the old one, so a bad setting cannot lock users out.
+    const writeSshdConfig = (content: string) =>
+        cockpit.spawn(["/bin/sh", "-c", REPLACE_SSHD_CONFIG_SCRIPT], { superuser: "require", err: "message" }).input(content);
+
     const applySetting = async (key: string, value: string) => {
         setError("");
         setSuccess("");
@@ -85,7 +91,7 @@ export const SSHHardeningPage = () => {
                 content += `\n${key} ${value}\n`;
             }
 
-            await cockpit.file("/etc/ssh/sshd_config", { superuser: "require" }).replace(content);
+            await writeSshdConfig(content);
             setRawConfig(content);
             parseConfig(content);
             setSuccess(_("Setting applied: ") + key + " = " + value);
@@ -97,6 +103,7 @@ export const SSHHardeningPage = () => {
     const restartSSHD = async () => {
         setError("");
         try {
+            await cockpit.spawn(["/bin/sh", "-c", TEST_SSHD_CONFIG_SCRIPT], { superuser: "require", err: "message" });
             // Try 'sshd' first (RHEL/Fedora), fall back to 'ssh' (Debian/Ubuntu)
             try {
                 await cockpit.spawn(["systemctl", "restart", "sshd"], { superuser: "require" });
@@ -134,7 +141,7 @@ export const SSHHardeningPage = () => {
                 }
             }
 
-            await cockpit.file("/etc/ssh/sshd_config", { superuser: "require" }).replace(content);
+            await writeSshdConfig(content);
             setRawConfig(content);
             parseConfig(content);
             setSuccess(_("All hardening settings applied. Restart SSHD to activate."));
