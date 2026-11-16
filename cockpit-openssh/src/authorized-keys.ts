@@ -264,11 +264,14 @@ export async function userHasAuthorizedKey(user: SystemUser, effective: Effectiv
 
 /**
  * Files under a non-root user's home are edited as that user, so root never
- * follows links there; anything else (e.g. /etc/ssh/keys/%u) stays root's.
+ * follows links there (a home of / covers every path); anything else
+ * (e.g. /etc/ssh/keys/%u) stays root's.
  */
 function editingOwner(user: SystemUser, path: string): string | null {
-    const home = user.home.replace(/\/+$/, "");
-    return user.uid !== 0 && home && path.startsWith(`${home}/`) ? user.name : null;
+    if (user.uid === 0 || !user.home.startsWith("/"))
+        return null;
+    const home = user.home.replace(/\/+$/, "") + "/";
+    return path.startsWith(home) ? user.name : null;
 }
 
 async function ensureDirectory(user: SystemUser, owner: string | null, path: string): Promise<void> {
