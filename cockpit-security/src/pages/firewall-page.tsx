@@ -12,6 +12,8 @@ import { DescriptionList, DescriptionListGroup, DescriptionListTerm, Description
 
 import cockpit from 'cockpit';
 
+import { isValidServiceName, parsePortRange } from './command-arguments.js';
+
 const _ = cockpit.gettext;
 
 interface FirewallZone {
@@ -147,13 +149,18 @@ export const FirewallPage = () => {
         if (!newPort) return;
         setError("");
         setSuccess("");
+        const portRange = parsePortRange(newPort);
+        if (!portRange) {
+            setError(_("Enter a port (1-65535) or a range such as 8000-8010."));
+            return;
+        }
         try {
             if (backend === "firewalld") {
-                await cockpit.spawn(["firewall-cmd", "--permanent", "--add-port=" + newPort + "/tcp"], { superuser: "require" });
+                await cockpit.spawn(["firewall-cmd", "--permanent", "--add-port=" + portRange.firewalld + "/tcp"], { superuser: "require" });
                 await cockpit.spawn(["firewall-cmd", "--reload"], { superuser: "require" });
                 await loadFirewalldZones();
             } else if (backend === "ufw") {
-                await cockpit.spawn(["ufw", "allow", newPort + "/tcp"], { superuser: "require" });
+                await cockpit.spawn(["ufw", "allow", portRange.ufw + "/tcp"], { superuser: "require" });
                 await loadUfwRules();
             }
             setSuccess(_("Port added: ") + newPort);
@@ -167,6 +174,10 @@ export const FirewallPage = () => {
         if (!newService) return;
         setError("");
         setSuccess("");
+        if (!isValidServiceName(newService)) {
+            setError(_("Service names may contain letters, digits, spaces and . _ + - and must start with a letter or digit."));
+            return;
+        }
         try {
             if (backend === "firewalld") {
                 await cockpit.spawn(["firewall-cmd", "--permanent", "--add-service=" + newService], { superuser: "require" });
