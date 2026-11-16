@@ -33,7 +33,7 @@ A Cockpit extension for comprehensive Linux security monitoring and control.
 ## Installation
 
 ### Prerequisites
-- Node.js >= 16 and npm
+- Node.js >= 22 and npm
 - Cockpit installed on the target system
 - Git (for fetching cockpit build libraries)
 

@@ -14,7 +14,7 @@ A [Cockpit](https://cockpit-project.org/) extension for managing file backups us
 
 - [Cockpit](https://cockpit-project.org/) installed and running
 - [restic](https://restic.net/) installed
-- Node.js and npm (for building)
+- Node.js >= 22 and npm (for building)
 
 ## Quick Install
 
