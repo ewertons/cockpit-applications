@@ -3,7 +3,7 @@
 const PORT_RANGE_PATTERN = /^(\d{1,5})(?:-(\d{1,5}))?$/;
 const SERVICE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._+-]*$/;
 const IPV4_PATTERN = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
-const IPV6_PATTERN = /^[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*$/;
+const IPV6_GROUP_PATTERN = /^[0-9A-Fa-f]{1,4}$/;
 
 function isPortNumber(value: string): boolean {
     const port = Number(value);
@@ -30,12 +30,41 @@ export function isValidServiceName(value: string): boolean {
     return value.length <= 64 && SERVICE_NAME_PATTERN.test(value);
 }
 
+function isValidIpv4Address(value: string): boolean {
+    const ipv4 = IPV4_PATTERN.exec(value);
+    return ipv4 !== null && ipv4.slice(1).every(octet => Number(octet) <= 255);
+}
+
+/** Counts the 16-bit groups of one side of an IPv6 address, or returns null if a group is invalid. */
+function countIpv6Groups(part: string, allowEmbeddedIpv4: boolean): number | null {
+    if (part === "")
+        return 0;
+    const groups = part.split(":");
+    const last = groups[groups.length - 1];
+    let count = groups.length;
+    if (allowEmbeddedIpv4 && last.includes(".")) {
+        if (!isValidIpv4Address(last))
+            return null;
+        groups.pop();
+        count += 1;
+    }
+    return groups.every(group => IPV6_GROUP_PATTERN.test(group)) ? count : null;
+}
+
+function isValidIpv6Address(value: string): boolean {
+    const halves = value.split("::");
+    if (halves.length > 2)
+        return false;
+    if (halves.length === 1)
+        return countIpv6Groups(value, true) === 8;
+    const head = countIpv6Groups(halves[0], false);
+    const tail = countIpv6Groups(halves[1], true);
+    return head !== null && tail !== null && head + tail <= 7;
+}
+
 /** Single IPv4 or IPv6 address, as accepted by "fail2ban-client unban". */
 export function isValidIpAddress(value: string): boolean {
-    const ipv4 = IPV4_PATTERN.exec(value);
-    if (ipv4)
-        return ipv4.slice(1).every(octet => Number(octet) <= 255);
-    return value.length <= 45 && IPV6_PATTERN.test(value);
+    return isValidIpv4Address(value) || (value.length <= 45 && isValidIpv6Address(value));
 }
 
 /**

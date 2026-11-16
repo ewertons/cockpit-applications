@@ -29,12 +29,13 @@ describe("isValidServiceName", () => {
 
 describe("isValidIpAddress", () => {
     test("accepts IPv4 and IPv6 addresses", () => {
-        for (const value of ["192.0.2.1", "2001:db8::1", "::1"])
+        for (const value of ["192.0.2.1", "2001:db8::1", "::1", "::", "fe80::1:2", "2001:db8:0:0:0:0:0:1", "::ffff:192.0.2.1", "1:2:3:4:5:6:1.2.3.4"])
             assert.equal(isValidIpAddress(value), true, value);
     });
 
     test("rejects options and malformed values", () => {
-        for (const value of ["", "--all", "256.1.1.1", "192.0.2", "host.example", "1.2.3.4 5.6.7.8"])
+        for (const value of ["", "--all", "256.1.1.1", "192.0.2", "host.example", "1.2.3.4 5.6.7.8",
+                             ":", "1:2", "2001:::1", "::ffff:999.1.1.1", "1::2::3", "12345::1", "1:2:3:4:5:6:7:8:9", "1:2:3:4:5:6:7::8", "1.2.3.4::1", ":1::2"])
             assert.equal(isValidIpAddress(value), false, value);
     });
 });
