@@ -129,7 +129,7 @@ export const AuditLogPage = () => {
         try {
             const args = ["journalctl", "--no-pager", "-n", lineCount, "--output", "short-iso"];
             if (filter) {
-                args.push("--grep", filter);
+                args.push("--grep=" + filter);
             }
             // Focus on security-relevant units
             args.push(
