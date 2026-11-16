@@ -22,6 +22,8 @@ import {
     configureListeners,
     httpPortFromConfig,
     listenersAreLoopbackOnly,
+    redisConnectionFromConfig,
+    redisEnvironment,
     validateAdminPassword,
 } from './ntopng-config.js';
 
@@ -338,13 +340,18 @@ export const NtopngPage = () => {
             const currentConfig = (await configFile.read()) ?? "";
             if (httpPortFromConfig(configureListeners(currentConfig, false)) === 0)
                 throw new Error(cockpit.format(_("The ntopng HTTP listener is disabled (-w=0) in $0. Enable it before setting up the local instance."), NTOPNG_CONFIG_PATH));
+            const redisConnection = redisConnectionFromConfig(currentConfig);
 
             // Set the password while ntopng only listens on loopback, then widen the listener if requested.
             let configContent = await configFile.modify((content: string | null) => configureListeners(content ?? "", false));
             await cockpit.spawn(["systemctl", "restart", "ntopng"], { superuser: "require", err: "message" });
             setLocalRunning(true);
             try {
-                const passwordProcess = cockpit.spawn(["sh", "-c", SET_ADMIN_PASSWORD_SCRIPT], { superuser: "require", err: "message" });
+                const passwordProcess = cockpit.spawn(["sh", "-c", SET_ADMIN_PASSWORD_SCRIPT], {
+                    superuser: "require",
+                    err: "message",
+                    environ: redisEnvironment(redisConnection),
+                });
                 passwordProcess.input(setupPassword);
                 await passwordProcess;
             } catch (passwordError) {
