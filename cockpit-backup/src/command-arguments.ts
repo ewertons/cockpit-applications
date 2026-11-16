@@ -183,7 +183,12 @@ export function systemdEnvironmentLine(name: string, value: string): string {
     return `Environment="${escaped}"`;
 }
 
-/** Escapes free text (e.g. Description=) for a unit file: one line, no specifier expansion. */
+/**
+ * Escapes free text (e.g. Description=) for a unit file: one line, no specifier expansion,
+ * and no trailing backslash (systemd would join the next line into the value).
+ */
 export function escapeSystemdText(text: string): string {
-    return text.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/%/g, "%%"); // eslint-disable-line no-control-regex
+    return text.replace(/[\u0000-\u001f\u007f]+/g, " ") // eslint-disable-line no-control-regex
+            .replace(/[\s\\]+$/, "")
+            .replace(/%/g, "%%");
 }
