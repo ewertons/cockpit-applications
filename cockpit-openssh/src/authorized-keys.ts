@@ -262,16 +262,34 @@ export async function userHasAuthorizedKey(user: SystemUser, effective: Effectiv
     return (await readKeys(authorizedKeysPathFor(user, effective))).length > 0;
 }
 
+/** Drops empty and "." segments; null when ".." makes the location ambiguous. */
+function normalizePath(path: string): string | null {
+    const parts = path.split("/").filter(part => part !== "" && part !== ".");
+    return parts.includes("..") ? null : "/" + parts.join("/");
+}
+
+const isWithin = (path: string, dir: string) => dir === "/" || path === dir || path.startsWith(dir + "/");
+
 /**
  * Files under a non-root user's home are edited as that user, so root never
- * follows links there (a home of / covers every path); anything else
- * (e.g. /etc/ssh/keys/%u) stays root's.
+ * follows links there. Paths are compared both as spelled and with links
+ * resolved (e.g. /home -> /usr/home); only a path clearly elsewhere
+ * (e.g. /etc/ssh/keys/%u) stays root's, anything ambiguous is the user's.
  */
-function editingOwner(user: SystemUser, path: string): string | null {
-    if (user.uid === 0 || !user.home.startsWith("/"))
+async function editingOwner(user: SystemUser, path: string): Promise<string | null> {
+    if (user.uid === 0)
         return null;
-    const home = user.home.replace(/\/+$/, "") + "/";
-    return path.startsWith(home) ? user.name : null;
+    const home = user.home.startsWith("/") ? normalizePath(user.home) : null;
+    const target = path.startsWith("/") ? normalizePath(path) : null;
+    if (!home || !target || isWithin(target, home))
+        return user.name;
+    try {
+        const [realHome, realTarget] = (await cockpit.spawn(["realpath", "-m", "--", home, target],
+                                                            { superuser: "try", err: "message" })).split("\n");
+        return !realHome || !realTarget || isWithin(realTarget, realHome) ? user.name : null;
+    } catch {
+        return user.name;
+    }
 }
 
 async function ensureDirectory(user: SystemUser, owner: string | null, path: string): Promise<void> {
@@ -306,7 +324,7 @@ export async function addKey(user: SystemUser, path: string, line: string): Prom
     if (!parsed)
         throw new Error(_("That does not look like an SSH public key."));
 
-    const owner = editingOwner(user, path);
+    const owner = await editingOwner(user, path);
     await ensureDirectory(user, owner, path);
 
     await modifyFile(owner, path, content => {
@@ -320,7 +338,7 @@ export async function addKey(user: SystemUser, path: string, line: string): Prom
 }
 
 export async function removeKey(user: SystemUser, path: string, raw: string): Promise<void> {
-    const owner = editingOwner(user, path);
+    const owner = await editingOwner(user, path);
     await modifyFile(owner, path, current => {
         const lines = current.split("\n");
         const kept = lines.filter(line => line.trim() !== raw.trim());
