@@ -62,6 +62,28 @@ interface ActiveFlow {
 
 const CONFIG_FILE = "/etc/cockpit/cockpit-security-ntopng.json";
 
+// Writes stdin to "$1" through a 0600 temp file and a rename: the file holds passwords.
+const WRITE_PRIVATE_SCRIPT = 'umask 077; t=$(mktemp -- "$1.XXXXXXXX") || exit 1; ' +
+    'if cat > "$t" && mv -f -- "$t" "$1"; then exit 0; fi; rm -f -- "$t"; exit 1';
+
+const isHttpUrl = (url: string) => {
+    try {
+        return ["http:", "https:"].includes(new URL(url).protocol);
+    } catch {
+        return false;
+    }
+};
+
+/** Fetches url with curl, passing the credentials on stdin so they stay out of process listings. */
+const curlWithAuth = (inst: NtopngInstance, url: string) => {
+    const quote = (text: string) => '"' + text.replace(/[\\"]/g, c => "\\" + c)
+            .replace(/\r/g, "\\r")
+            .replace(/\n/g, "\\n") + '"';
+    const proc = cockpit.spawn(["curl", "-s", "--proto", "=http,https", "-K", "-", "--url", url], { err: "ignore" });
+    proc.input(`user = ${quote(`${inst.username}:${inst.password}`)}\n`);
+    return proc;
+};
+
 export const NtopngPage = () => {
     const [instances, setInstances] = useState<NtopngInstance[]>([]);
     const [activeInstance, setActiveInstance] = useState<NtopngInstance | null>(null);
@@ -150,8 +172,10 @@ export const NtopngPage = () => {
     };
 
     const writeInstances = async (newInstances: NtopngInstance[]) => {
-        await cockpit.file(CONFIG_FILE, { superuser: "require" })
-                .replace(JSON.stringify({ instances: newInstances }, null, 2));
+        const proc = cockpit.spawn(["sh", "-c", WRITE_PRIVATE_SCRIPT, "sh", CONFIG_FILE],
+                                   { superuser: "require", err: "message" });
+        proc.input(JSON.stringify({ instances: newInstances }, null, 2));
+        await proc;
         setInstances(newInstances);
     };
 
@@ -195,10 +219,7 @@ export const NtopngPage = () => {
 
     const testConnectionViaCurl = async (inst: NtopngInstance) => {
         try {
-            const result = await cockpit.spawn([
-                "curl", "-s", "-u", `${inst.username}:${inst.password}`,
-                `${inst.url}/lua/rest/v2/get/ntopng/interfaces.lua`
-            ], { err: "ignore" });
+            const result = await curlWithAuth(inst, `${inst.url}/lua/rest/v2/get/ntopng/interfaces.lua`);
             const data = JSON.parse(result);
             if (data.rc === 0) {
                 const interfaces = Object.entries(data.rsp).map(([id, info]: [string, any]) => ({
@@ -222,9 +243,7 @@ export const NtopngPage = () => {
         const qs = params ? "?" + new URLSearchParams(params).toString() : "";
         const url = `${inst.url}${endpoint}${qs}`;
         try {
-            const result = await cockpit.spawn([
-                "curl", "-s", "-u", `${inst.username}:${inst.password}`, url
-            ], { err: "ignore" });
+            const result = await curlWithAuth(inst, url);
             return JSON.parse(result);
         } catch {
             return null;
@@ -400,6 +419,10 @@ export const NtopngPage = () => {
     const addInstance = async () => {
         if (!formUrl || !formUser || !formPass) {
             setError(_("URL, username and password are required."));
+            return;
+        }
+        if (!isHttpUrl(formUrl)) {
+            setError(_("The URL must start with http:// or https://."));
             return;
         }
         const inst: NtopngInstance = {
@@ -849,7 +872,7 @@ ntopng -i "ntopng -i tcp://${routerIP || "<ROUTER_IP>"}:${netflowPort}" -m "${nt
                             <Button
                                 variant="primary"
                                 component="a"
-                                href={activeInstance.url}
+                                href={isHttpUrl(activeInstance.url) ? activeInstance.url : undefined}
                                 target="_blank"
                             >
                                 {_("Open Full ntopng Dashboard")} ↗
