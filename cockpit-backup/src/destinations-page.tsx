@@ -14,6 +14,7 @@ import { ClipboardCopy } from "@patternfly/react-core/dist/esm/components/Clipbo
 
 import cockpit from 'cockpit';
 import { Destination, loadDestinations, saveDestinations, initRepo, createPasswordFile, checkRepo, destEnvVars } from './restic.js';
+import { validateKeyPath, validateRepository } from './command-arguments.js';
 
 const _ = cockpit.gettext;
 
@@ -310,7 +311,9 @@ function DestinationDialog({ onSave, onClose }: DestinationDialogProps) {
         onSave(dest, password);
     };
 
-    const canSubmit = name.trim() && path.trim() && password && password === passwordConfirm;
+    const validationError = (path.trim() ? validateRepository(path) : null) ||
+        (type === 'sftp' && sshKey.trim() ? validateKeyPath(sshKey.trim()) : null);
+    const canSubmit = name.trim() && path.trim() && password && password === passwordConfirm && !validationError;
 
     return (
         <Modal variant="medium" isOpen onClose={onClose}>
@@ -439,6 +442,7 @@ id="dest-password-confirm" type="password" value={passwordConfirm}
                         </Card>
                     )}
                 </div>
+                {validationError && <Alert variant="danger" isInline title={validationError} style={{ marginTop: "1rem" }} />}
             </ModalBody>
             <ModalFooter>
                 <Button variant="primary" onClick={handleSubmit} isDisabled={!canSubmit}>
