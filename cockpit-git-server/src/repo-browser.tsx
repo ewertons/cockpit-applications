@@ -10,6 +10,7 @@ import { Breadcrumb, BreadcrumbItem } from "@patternfly/react-core/dist/esm/comp
 import { Pagination } from "@patternfly/react-core/dist/esm/components/Pagination/index.js";
 
 import cockpit from 'cockpit';
+import { repoGit } from './repo-git.js';
 
 const _ = cockpit.gettext;
 const BASE_PATH = "/srv/git";
@@ -67,9 +68,7 @@ export const RepoBrowser = ({ repoName, currentRef, currentPath, commitHash }: R
     const [loading, setLoading] = useState(true);
     const [error] = useState("");
 
-    const gitCmd = useCallback((args: string[]) =>
-        cockpit.spawn(["git", "--git-dir", repoPath, ...args], { superuser: "try", err: "ignore" })
-                .catch(() => ""), [repoPath]);
+    const gitCmd = useCallback((args: string[]) => repoGit(repoPath, args), [repoPath]);
 
     // Load branches and tags
     useEffect(() => {

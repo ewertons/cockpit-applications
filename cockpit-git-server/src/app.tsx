@@ -23,8 +23,8 @@ interface LocationState {
     commitHash?: string;
 }
 
-// Repositories are directories directly under /srv/git; see repositories-page.tsx.
-const isRepoName = (name: string) => /^[a-zA-Z0-9._-]+$/.test(name) && name !== "." && name !== "..";
+// Repositories are directories directly under /srv/git: one non-empty path component.
+const isRepoName = (name: string) => name !== "" && !/[/\0]/.test(name) && name !== "." && name !== "..";
 
 // Anything else in ?commit= is dropped rather than passed to git.
 const commitOption = (value: string | string[] | undefined) =>
