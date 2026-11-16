@@ -18,7 +18,7 @@ PACKAGE_NAME="cockpit-security"
 echo "==> Checking prerequisites..."
 
 # Minimum required Node.js major version
-MIN_NODE_VERSION=16
+MIN_NODE_VERSION=22
 
 # Install Node.js and npm if not present
 if ! command -v node &>/dev/null || ! command -v npm &>/dev/null; then
@@ -43,7 +43,11 @@ fi
 NODE_MAJOR=$(node -e "console.log(process.versions.node.split('.')[0])")
 if (( NODE_MAJOR < MIN_NODE_VERSION )); then
     echo "ERROR: Node.js >= $MIN_NODE_VERSION is required, but found version $(node --version)." >&2
-    echo "       Please upgrade Node.js and retry." >&2
+    echo "       Distribution packages are often older. Install Node.js $MIN_NODE_VERSION or newer, e.g.:" >&2
+    echo "         - Fedora/RHEL: sudo dnf module install nodejs:$MIN_NODE_VERSION (where available)" >&2
+    echo "         - Debian/Ubuntu: the NodeSource apt repository or a newer release's nodejs package" >&2
+    echo "         - Any distribution: nvm, or the official binaries from https://nodejs.org/en/download" >&2
+    echo "       Then make sure 'node --version' reports v$MIN_NODE_VERSION or newer and run this script again." >&2
     exit 1
 fi
 echo "    node $(node --version), npm $(npm --version)"
@@ -58,7 +62,11 @@ BUILD_CMD() {
 }
 
 echo "==> Installing npm dependencies..."
-BUILD_CMD npm install --ignore-scripts 2>&1 | tail -5
+if [[ -f package-lock.json ]]; then
+    BUILD_CMD npm ci --ignore-scripts 2>&1 | tail -5
+else
+    BUILD_CMD npm install --ignore-scripts 2>&1 | tail -5
+fi
 
 echo "==> Fetching Cockpit build libraries..."
 BUILD_CMD make pkg/lib/cockpit-po-plugin.js 2>&1 | tail -5
