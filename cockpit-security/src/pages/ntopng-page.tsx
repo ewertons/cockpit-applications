@@ -20,6 +20,7 @@ import {
     NTOPNG_DEFAULT_HTTP_PORT,
     SET_ADMIN_PASSWORD_SCRIPT,
     configureListeners,
+    httpLoopbackAddressFromConfig,
     httpPortFromConfig,
     listenersAreLoopbackOnly,
     redisConnectionFromConfig,
@@ -69,6 +70,7 @@ export const NtopngPage = () => {
     const [localRunning, setLocalRunning] = useState(false);
     const [localLoopbackOnly, setLocalLoopbackOnly] = useState<boolean | null>(null);
     const [localHttpPort, setLocalHttpPort] = useState(NTOPNG_DEFAULT_HTTP_PORT);
+    const [localHttpLoopbackAddress, setLocalHttpLoopbackAddress] = useState("127.0.0.1");
 
     // Local setup dialog
     const [showLocalSetup, setShowLocalSetup] = useState(false);
@@ -126,6 +128,7 @@ export const NtopngPage = () => {
             const content = await cockpit.file(NTOPNG_CONFIG_PATH, { superuser: "try" }).read();
             setLocalLoopbackOnly(listenersAreLoopbackOnly(content ?? ""));
             setLocalHttpPort(httpPortFromConfig(content ?? ""));
+            setLocalHttpLoopbackAddress(httpLoopbackAddressFromConfig(content ?? ""));
         } catch {
             setLocalLoopbackOnly(null);
         }
@@ -334,7 +337,7 @@ export const NtopngPage = () => {
         }
         setSettingUpLocal(true);
         setSetupError("");
-        let passwordChanged = false;
+        let passwordMayHaveChanged = false;
         try {
             const configFile = cockpit.file(NTOPNG_CONFIG_PATH, { superuser: "require" });
             const currentConfig = (await configFile.read()) ?? "";
@@ -346,6 +349,8 @@ export const NtopngPage = () => {
             let configContent = await configFile.modify((content: string | null) => configureListeners(content ?? "", false));
             await cockpit.spawn(["systemctl", "restart", "ntopng"], { superuser: "require", err: "message" });
             setLocalRunning(true);
+            // A failure part-way through the script can leave the new password stored.
+            passwordMayHaveChanged = true;
             try {
                 const passwordProcess = cockpit.spawn(["sh", "-c", SET_ADMIN_PASSWORD_SCRIPT], {
                     superuser: "require",
@@ -359,7 +364,6 @@ export const NtopngPage = () => {
                 setLocalRunning(false);
                 throw passwordError;
             }
-            passwordChanged = true;
 
             if (setupListenOnAllInterfaces) {
                 configContent = await configFile.modify((content: string | null) => configureListeners(content ?? "", true));
@@ -370,6 +374,7 @@ export const NtopngPage = () => {
 
             const port = httpPortFromConfig(configContent);
             setLocalHttpPort(port);
+            setLocalHttpLoopbackAddress(httpLoopbackAddressFromConfig(configContent));
             const localInstance: NtopngInstance = {
                 id: "local",
                 url: `http://127.0.0.1:${port}`,
@@ -385,8 +390,8 @@ export const NtopngPage = () => {
             setTimeout(() => testConnection(localInstance), 3000);
         } catch (e: any) {
             const message = e.message || String(e);
-            setSetupError(passwordChanged
-                ? cockpit.format(_("The ntopng admin password was already changed, but setup did not finish: $0"), message)
+            setSetupError(passwordMayHaveChanged
+                ? cockpit.format(_("The ntopng admin password may already have been changed, but setup did not finish: $0"), message)
                 : message);
         }
         setSettingUpLocal(false);
@@ -507,7 +512,7 @@ ntopng -i "ntopng -i tcp://${routerIP || "<ROUTER_IP>"}:${netflowPort}" -m "${nt
                     )}
                     {localInstalled && localLoopbackOnly === true && (
                         <p className="pf-v6-u-mt-md">
-                            {cockpit.format(_("The web interface only listens on 127.0.0.1. To open it from another machine, use an SSH tunnel: ssh -L $0:127.0.0.1:$0 <user>@<this server>"), String(localHttpPort))}
+                            {cockpit.format(_("The web interface only listens on the loopback address $1. To open it from another machine, use an SSH tunnel: ssh -L $0:$1:$0 <user>@<this server>"), String(localHttpPort), localHttpLoopbackAddress)}
                         </p>
                     )}
                 </CardBody>
