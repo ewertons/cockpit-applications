@@ -4,6 +4,7 @@ import { Sidebar, SidebarContent, SidebarPanel } from "@patternfly/react-core/di
 import { Nav, NavItem, NavList } from "@patternfly/react-core/dist/esm/components/Nav/index.js";
 
 import cockpit from 'cockpit';
+import { superuser } from 'superuser';
 
 import { BackupProvider } from './backup-context.jsx';
 import { JobsPage } from './jobs-page.jsx';
@@ -13,6 +14,10 @@ import { LogsPage } from './logs-page.jsx';
 import { StatusPage } from './status-page.jsx';
 
 const _ = cockpit.gettext;
+
+// Configuration read without administrative access is incomplete; reload
+// everything when access changes rather than edit from that state.
+superuser.reload_page_on_change();
 
 type AppPage = "status" | "jobs" | "snapshots" | "destinations" | "logs";
 

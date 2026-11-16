@@ -116,10 +116,11 @@ async function writeEnvironmentFile(path: string, env: string[]): Promise<void> 
         const separator = entry.indexOf("=");
         const name = entry.slice(0, separator);
         const value = entry.slice(separator + 1);
-        // Single quotes keep the value literal; these characters cannot be stored that way.
-        if (/['\r\n\0]/.test(value))
-            throw new Error(`${name} must not contain single quotes or line breaks`);
-        return `${name}='${value}'`;
+        // systemd ends a line at a line break and cannot store NUL.
+        if (/[\r\n\0]/.test(value))
+            throw new Error(`${name} must not contain line breaks`);
+        // Inside double quotes systemd unescapes \\, \", \` and \$; nothing else is special.
+        return `${name}="${value.replace(/[\\"`$]/g, c => "\\" + c)}"`;
     });
     await makePrivateDir(CONFIG_DIR);
     await makePrivateDir(ENV_DIR);
@@ -488,30 +489,43 @@ export async function unlockRepo(repo: string, passwordFile: string, envVars?: R
 
 // --- Configuration management ---
 
-export async function loadJobs(): Promise<BackupJob[]> {
+// Config files whose last read succeeded (a missing file counts). Saving one that
+// could not be read, e.g. without administrative access, would overwrite it.
+const readableConfig = new Set<string>();
+
+async function loadConfig<T>(path: string): Promise<T[]> {
     try {
-        const content = await cockpit.file(JOBS_FILE, { superuser: "try" }).read();
-        return content ? JSON.parse(content) : [];
+        const content = await cockpit.file(path, { superuser: "try" }).read();
+        const items = content ? JSON.parse(content) : [];
+        readableConfig.add(path);
+        return items;
     } catch {
+        readableConfig.delete(path);
         return [];
     }
 }
 
+function assertConfigReadable(path: string): void {
+    if (!readableConfig.has(path))
+        throw new Error(`${path} could not be read; it was left unchanged`);
+}
+
+export async function loadJobs(): Promise<BackupJob[]> {
+    return loadConfig<BackupJob>(JOBS_FILE);
+}
+
 export async function saveJobs(jobs: BackupJob[]): Promise<void> {
+    assertConfigReadable(JOBS_FILE);
     await makePrivateDir(CONFIG_DIR);
     await writePrivateFile(JOBS_FILE, JSON.stringify(jobs, null, 2));
 }
 
 export async function loadDestinations(): Promise<Destination[]> {
-    try {
-        const content = await cockpit.file(DESTINATIONS_FILE, { superuser: "try" }).read();
-        return content ? JSON.parse(content) : [];
-    } catch {
-        return [];
-    }
+    return loadConfig<Destination>(DESTINATIONS_FILE);
 }
 
 export async function saveDestinations(destinations: Destination[]): Promise<void> {
+    assertConfigReadable(DESTINATIONS_FILE);
     await makePrivateDir(CONFIG_DIR);
     await writePrivateFile(DESTINATIONS_FILE, JSON.stringify(destinations, null, 2));
 }
