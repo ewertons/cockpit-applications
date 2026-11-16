@@ -10,6 +10,13 @@ import { DescriptionList, DescriptionListDescription, DescriptionListGroup, Desc
 
 import cockpit from 'cockpit';
 
+import {
+    GIT_DAEMON_DEFAULTS_PATH,
+    configureReadOnlyDefaults,
+    defaultsEnableReceivePack,
+    removeReceivePackFromDefaults,
+} from './git-daemon-config.js';
+
 const _ = cockpit.gettext;
 
 interface ServiceDef {
@@ -27,6 +34,7 @@ interface ServiceInfo extends ServiceDef {
     unitFileState: string;
     installed: boolean;
     firewallBlocked?: boolean; // true if port is blocked by ufw
+    daemonPushEnabled?: boolean; // git daemon started with --enable=receive-pack
 }
 
 const SERVICES: ServiceDef[] = [
@@ -158,6 +166,14 @@ export const ServicesPage = () => {
                 } catch { /* ufw not available, skip */ }
             }
 
+            let daemonPushEnabled = false;
+            if (unit === "git-daemon.service") {
+                try {
+                    const defaults = await cockpit.file(GIT_DAEMON_DEFAULTS_PATH).read();
+                    daemonPushEnabled = defaultsEnableReceivePack(defaults ?? "");
+                } catch { /* defaults file not readable, skip */ }
+            }
+
             return {
                 ...svc,
                 unit,
@@ -166,6 +182,7 @@ export const ServicesPage = () => {
                 subState: props.SubState || "unknown",
                 unitFileState: props.UnitFileState || "unknown",
                 firewallBlocked,
+                daemonPushEnabled,
             };
         });
 
@@ -210,6 +227,25 @@ export const ServicesPage = () => {
                 });
     };
 
+    const disableDaemonPush = (svc: ServiceInfo) => {
+        setActionInProgress(svc.unit);
+        setError("");
+
+        cockpit.file(GIT_DAEMON_DEFAULTS_PATH, { superuser: "require" })
+                .modify((content: string | null) => removeReceivePackFromDefaults(content ?? ""))
+                .then(() => svc.activeState === "active"
+                    ? cockpit.spawn(["systemctl", "restart", svc.unit], { superuser: "require", err: "message" })
+                    : "")
+                .then(() => {
+                    setTimeout(loadServices, 1000);
+                    setActionInProgress(null);
+                })
+                .catch((ex: cockpit.BasicError) => {
+                    setError(ex.message || String(ex));
+                    setActionInProgress(null);
+                });
+    };
+
     const installPackage = (svc: ServiceInfo) => {
         if (!pkgManager) {
             setError(_("No supported package manager found (apt or dnf)."));
@@ -225,18 +261,11 @@ export const ServicesPage = () => {
 
         cockpit.spawn(cmd, { superuser: "require", err: "message" })
                 .then(() => {
-                    // Post-install: configure git-daemon to use /srv/git
-                    if (svc.unit === "git-daemon.service") {
-                        return cockpit.spawn(["bash", "-c",
-                            "sed -i 's/GIT_DAEMON_ENABLE=false/GIT_DAEMON_ENABLE=true/' /etc/default/git-daemon; " +
-                            "sed -i 's|GIT_DAEMON_BASE_PATH=.*|GIT_DAEMON_BASE_PATH=/srv/git|' /etc/default/git-daemon; " +
-                            "sed -i 's|GIT_DAEMON_DIRECTORY=.*|GIT_DAEMON_DIRECTORY=/srv/git|' /etc/default/git-daemon; " +
-                            "sed -i 's/GIT_DAEMON_USER=.*/GIT_DAEMON_USER=git/' /etc/default/git-daemon; " +
-                            "grep -q 'GIT_DAEMON_OPTIONS' /etc/default/git-daemon && " +
-                            "sed -i 's|GIT_DAEMON_OPTIONS=.*|GIT_DAEMON_OPTIONS=\"--enable=receive-pack\"|' /etc/default/git-daemon || " +
-                            "echo 'GIT_DAEMON_OPTIONS=\"--enable=receive-pack\"' >> /etc/default/git-daemon; " +
-                            "systemctl restart git-daemon"
-                        ], { superuser: "require", err: "ignore" });
+                    // Post-install: serve /srv/git read-only; pushing is done over SSH
+                    if (svc.unit === "git-daemon.service" && pkgManager === "apt") {
+                        return cockpit.file(GIT_DAEMON_DEFAULTS_PATH, { superuser: "require" })
+                                .modify((content: string | null) => configureReadOnlyDefaults(content ?? "", "/srv/git"))
+                                .then(() => cockpit.spawn(["systemctl", "restart", "git-daemon"], { superuser: "require", err: "message" }));
                     }
                     return Promise.resolve("");
                 })
@@ -358,6 +387,24 @@ export const ServicesPage = () => {
                             )}
                         </DescriptionList>
 
+                        {svc.installed && svc.daemonPushEnabled && (
+                            <Alert
+                                variant="warning"
+                                isInline
+                                title={_("Git daemon accepts unauthenticated push (--enable=receive-pack). Anyone who can reach port 9418 can write to exported repositories.")}
+                                style={{ marginTop: "0.75rem" }}
+                                actionLinks={
+                                    <Button
+                                        variant="link"
+                                        onClick={() => disableDaemonPush(svc)}
+                                        isDisabled={actionInProgress === svc.unit}
+                                    >
+                                        {_("Make read-only")}
+                                    </Button>
+                                }
+                            />
+                        )}
+
                         {svc.installed && svc.firewallBlocked && (
                             <Alert
                                 variant="warning"
@@ -455,6 +502,11 @@ export const ServicesPage = () => {
                         <p style={{ marginTop: "0.5rem" }}>
                             {_("This makes the service accessible from other machines on the network.")}
                         </p>
+                        {firewallTarget.port === 9418 && (
+                            <p style={{ marginTop: "0.5rem" }}>
+                                {_("git:// has no authentication: every exported repository becomes readable by anyone who can reach this port. Pushing is only supported over SSH.")}
+                            </p>
+                        )}
                     </ModalBody>
                     <ModalFooter>
                         <Button variant="primary" onClick={() => openFirewallPort(firewallTarget)} isLoading={openingFirewall} isDisabled={openingFirewall}>
