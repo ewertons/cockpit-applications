@@ -104,6 +104,8 @@ install: $(DIST_TEST) po/LINGUAS
 	msgfmt --xml -d po \
 		--template $(APPSTREAMFILE) \
 		-o $(DESTDIR)$(PREFIX)/share/metainfo/$(APPSTREAMFILE)
+	install -D -m 644 packaging/$(RPM_NAME).sysusers $(DESTDIR)$(PREFIX)/lib/sysusers.d/$(RPM_NAME).conf
+	install -D -m 644 packaging/$(RPM_NAME).tmpfiles $(DESTDIR)$(PREFIX)/lib/tmpfiles.d/$(RPM_NAME).conf
 
 # this requires a built source tree and avoids having to install anything system-wide
 devel-install: $(DIST_TEST)

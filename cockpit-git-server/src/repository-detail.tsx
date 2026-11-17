@@ -8,6 +8,7 @@ import { DescriptionList, DescriptionListDescription, DescriptionListGroup, Desc
 import { Tabs, Tab, TabTitleText } from "@patternfly/react-core/dist/esm/components/Tabs/index.js";
 
 import cockpit from 'cockpit';
+import { repoGit } from './repo-git.js';
 
 const _ = cockpit.gettext;
 const BASE_PATH = "/srv/git";
@@ -38,9 +39,7 @@ export const RepositoryDetail = ({ repoName }: RepositoryDetailProps) => {
         setLoading(true);
         setError("");
 
-        const gitCmd = (args: string[]) =>
-            cockpit.spawn(["git", "--git-dir", repoPath, ...args], { superuser: "try", err: "ignore" })
-                    .catch(() => "");
+        const gitCmd = (args: string[]) => repoGit(repoPath, args);
 
         Promise.all([
             gitCmd(["branch"]),
@@ -69,7 +68,7 @@ export const RepositoryDetail = ({ repoName }: RepositoryDetailProps) => {
                 const currentHead = headRef.trim().replace("refs/heads/", "");
                 if (!branchList.includes(currentHead)) {
                     const target = branchList.includes("main") ? "main" : branchList[0];
-                    cockpit.spawn(["git", "--git-dir", repoPath, "symbolic-ref", "HEAD", `refs/heads/${target}`], { superuser: "try", err: "ignore" });
+                    repoGit(repoPath, ["symbolic-ref", "HEAD", `refs/heads/${target}`]);
                 }
             }
         })

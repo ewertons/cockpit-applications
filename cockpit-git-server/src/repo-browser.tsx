@@ -10,6 +10,7 @@ import { Breadcrumb, BreadcrumbItem } from "@patternfly/react-core/dist/esm/comp
 import { Pagination } from "@patternfly/react-core/dist/esm/components/Pagination/index.js";
 
 import cockpit from 'cockpit';
+import { repoGit } from './repo-git.js';
 
 const _ = cockpit.gettext;
 const BASE_PATH = "/srv/git";
@@ -67,9 +68,7 @@ export const RepoBrowser = ({ repoName, currentRef, currentPath, commitHash }: R
     const [loading, setLoading] = useState(true);
     const [error] = useState("");
 
-    const gitCmd = useCallback((args: string[]) =>
-        cockpit.spawn(["git", "--git-dir", repoPath, ...args], { superuser: "try", err: "ignore" })
-                .catch(() => ""), [repoPath]);
+    const gitCmd = useCallback((args: string[]) => repoGit(repoPath, args), [repoPath]);
 
     // Load branches and tags
     useEffect(() => {
@@ -90,8 +89,8 @@ export const RepoBrowser = ({ repoName, currentRef, currentPath, commitHash }: R
         const skip = (commitPage - 1) * COMMITS_PER_PAGE;
 
         Promise.all([
-            gitCmd(["log", selectedRef, `--format=%H|%h|%an|%ai|%s`, `-${COMMITS_PER_PAGE}`, `--skip=${skip}`]),
-            gitCmd(["rev-list", "--count", selectedRef]),
+            gitCmd(["log", `--format=%H|%h|%an|%ai|%s`, `-${COMMITS_PER_PAGE}`, `--skip=${skip}`, "--end-of-options", selectedRef]),
+            gitCmd(["rev-list", "--count", "--end-of-options", selectedRef]),
         ]).then(([logOut, countOut]: [string, string]) => {
             const parsed = logOut.trim().split("\n")
                     .filter(Boolean)
@@ -119,7 +118,7 @@ export const RepoBrowser = ({ repoName, currentRef, currentPath, commitHash }: R
         setLoading(true);
         const treePath = browsingPath ? `${selectedRef}:${browsingPath}` : selectedRef;
 
-        gitCmd(["ls-tree", treePath]).then((output: string) => {
+        gitCmd(["ls-tree", "--end-of-options", treePath]).then((output: string) => {
             const entries = output.trim().split("\n")
                     .filter(Boolean)
                     .map(line => {
@@ -154,7 +153,7 @@ export const RepoBrowser = ({ repoName, currentRef, currentPath, commitHash }: R
         setViewingFile(filePath);
         setActiveTab(2);
 
-        gitCmd(["show", `${selectedRef}:${filePath}`]).then((content: string) => {
+        gitCmd(["show", "--end-of-options", `${selectedRef}:${filePath}`]).then((content: string) => {
             setFileContent(content);
             setLoading(false);
         })
@@ -170,15 +169,15 @@ export const RepoBrowser = ({ repoName, currentRef, currentPath, commitHash }: R
         setViewingCommit(commit);
         setActiveTab(3);
 
-        gitCmd(["diff", `${commit.hash}^..${commit.hash}`, "--stat"]).then((statOut: string) => {
-            return gitCmd(["diff", `${commit.hash}^..${commit.hash}`]).then((diffOut: string) => {
+        gitCmd(["diff", "--stat", "--end-of-options", `${commit.hash}^..${commit.hash}`]).then((statOut: string) => {
+            return gitCmd(["diff", "--end-of-options", `${commit.hash}^..${commit.hash}`]).then((diffOut: string) => {
                 setDiffContent(statOut + "\n" + diffOut);
                 setLoading(false);
             });
         })
                 .catch(() => {
                     // First commit — no parent
-                    gitCmd(["diff", "--root", commit.hash]).then((diffOut: string) => {
+                    gitCmd(["diff", "--root", "--end-of-options", commit.hash]).then((diffOut: string) => {
                         setDiffContent(diffOut);
                         setLoading(false);
                     })

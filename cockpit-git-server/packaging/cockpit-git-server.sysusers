@@ -1,0 +1,2 @@
+# Account that owns /srv/git; the Cockpit page reads repositories as this account.
+u git - "Git repositories" /srv/git /usr/bin/git-shell
