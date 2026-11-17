@@ -247,11 +247,17 @@ export async function loadInterface(name: string): Promise<WgInterface | null> {
     return parseConfig(name, text);
 }
 
+// Writes stdin to "$1" through a 0600 temp file and a rename, so the keys in it
+// are never in a file other users can read.
+const WRITE_PRIVATE_SCRIPT = 'umask 077; t=$(mktemp -- "$1.XXXXXXXX") || exit 1; ' +
+    'if cat > "$t" && mv -f -- "$t" "$1"; then exit 0; fi; rm -f -- "$t"; exit 1';
+
 export async function saveInterface(iface: WgInterface): Promise<void> {
     const path = `${WG_DIR}/${iface.name}.conf`;
-    await cockpit.spawn(["mkdir", "-p", WG_DIR], { superuser: "try", err: "message" });
-    await cockpit.file(path, { superuser: "try" }).replace(serializeConfig(iface));
-    await cockpit.spawn(["chmod", "600", path], { superuser: "try", err: "message" });
+    await cockpit.spawn(["install", "-d", "-m", "0700", WG_DIR], { superuser: "try", err: "message" });
+    const proc = cockpit.spawn(["sh", "-c", WRITE_PRIVATE_SCRIPT, "sh", path], { superuser: "try", err: "message" });
+    proc.input(serializeConfig(iface));
+    await proc;
 }
 
 // Load all interfaces and attach live status
@@ -344,7 +350,7 @@ export async function setEnabledAtBoot(name: string, enabled: boolean): Promise<
 // Apply on-disk config to a running interface without dropping active peers.
 export async function applyLive(name: string): Promise<void> {
     await cockpit.spawn(
-        ["bash", "-c", `wg syncconf ${name} <(wg-quick strip ${name})`],
+        ["bash", "-c", 'wg syncconf "$1" <(wg-quick strip "$1")', "bash", name],
         { superuser: "try", err: "message" }
     );
 }
