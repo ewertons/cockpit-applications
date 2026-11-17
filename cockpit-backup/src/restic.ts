@@ -7,7 +7,6 @@ import {
     escapeSystemdText,
     hasControlCharacters,
     quoteSystemdExecArgument,
-    systemdEnvironmentLine,
 } from './command-arguments.js';
 
 // Types for restic JSON output
@@ -100,6 +99,40 @@ const CONFIG_DIR = "/etc/cockpit-backup";
 const JOBS_FILE = `${CONFIG_DIR}/jobs.json`;
 const DESTINATIONS_FILE = `${CONFIG_DIR}/destinations.json`;
 const PASSWORDS_DIR = `${CONFIG_DIR}/passwords`;
+const ENV_DIR = `${CONFIG_DIR}/env`;
+
+// Writes stdin to "$1" through a 0600 temp file and a rename, so secrets in it
+// are never in a file other users can read.
+const WRITE_PRIVATE_SCRIPT = 'umask 077; t=$(mktemp -- "$1.XXXXXXXX") || exit 1; ' +
+    'if cat > "$t" && mv -f -- "$t" "$1"; then exit 0; fi; rm -f -- "$t"; exit 1';
+
+async function makePrivateDir(dir: string): Promise<void> {
+    await cockpit.spawn(["install", "-d", "-m", "0700", dir], { superuser: "try", err: "message" });
+}
+
+async function writePrivateFile(path: string, content: string): Promise<void> {
+    const proc = cockpit.spawn(["sh", "-c", WRITE_PRIVATE_SCRIPT, "sh", path], { superuser: "try", err: "message" });
+    proc.input(content);
+    await proc;
+}
+
+/**
+ * Writes NAME=VALUE entries as a root-only systemd EnvironmentFile, so
+ * credentials stay out of unit files, `systemctl show` and command lines.
+ */
+async function writeEnvironmentFile(path: string, env: string[]): Promise<void> {
+    const lines = env.map(entry => {
+        const separator = entry.indexOf("=");
+        const name = entry.slice(0, separator);
+        const value = entry.slice(separator + 1);
+        assertValidEnvironmentVariable(name, value);
+        // Inside double quotes systemd unescapes \\, \", \` and \$; nothing else is special.
+        return `${name}="${value.replace(/[\\"`$]/g, c => "\\" + c)}"`;
+    });
+    await makePrivateDir(CONFIG_DIR);
+    await makePrivateDir(ENV_DIR);
+    await writePrivateFile(path, lines.join("\n") + "\n");
+}
 
 // Execute a restic command with JSON output
 function resticCmd(args: string[], repo: string, passwordFile: string, envVars?: Record<string, string>): Promise<string> {
@@ -120,8 +153,8 @@ function resticCmd(args: string[], repo: string, passwordFile: string, envVars?:
         }
     }
 
-    const cmd = ["env", ...env, "restic", ...extraArgs, ...args];
-    return cockpit.spawn(cmd, { superuser: "try", err: "message" })
+    // environ keeps credentials off the command line, where any user could read them.
+    return cockpit.spawn(["restic", ...extraArgs, ...args], { superuser: "try", err: "message", environ: env })
             .then((output: string) => output);
 }
 
@@ -233,6 +266,10 @@ export async function startBackupUnit(
 ): Promise<string> {
     const unitName = `${BACKUP_UNIT_PREFIX}-${jobId}`;
     const { env, resticArgs } = buildBackupCommand(sources, repo, passwordFile, options, envVars);
+    // One file per launch, so a concurrent launch cannot replace these credentials.
+    const launchId = Array.from(crypto.getRandomValues(new Uint8Array(8)), byte => byte.toString(16).padStart(2, "0")).join("");
+    const environmentFile = `${ENV_DIR}/run-${jobId}-${launchId}`;
+    await writeEnvironmentFile(environmentFile, env);
 
     const cmd = [
         "systemd-run",
@@ -241,12 +278,18 @@ export async function startBackupUnit(
         "--property=StandardOutput=journal",
         "--property=StandardError=journal",
         "--property=SyslogIdentifier=" + unitName,
+        "--property=EnvironmentFile=" + environmentFile,
+        "--property=ExecStopPost=/bin/rm -f -- " + quoteSystemdExecArgument(environmentFile),
         "--",
-        "env", ...env,
         "restic", ...resticArgs,
     ];
 
-    await cockpit.spawn(cmd, { superuser: "try", err: "message" });
+    try {
+        await cockpit.spawn(cmd, { superuser: "try", err: "message" });
+    } catch (error) {
+        await cockpit.spawn(["rm", "-f", "--", environmentFile], { superuser: "try", err: "ignore" }).catch(() => undefined);
+        throw error;
+    }
     return unitName;
 }
 
@@ -329,8 +372,7 @@ export function runBackup(
     onProgress?: (progress: BackupProgress) => void
 ): cockpit.Spawn {
     const { env, resticArgs } = buildBackupCommand(sources, repo, passwordFile, options, envVars);
-    const cmd = ["env", ...env, "restic", ...resticArgs];
-    const proc = cockpit.spawn(cmd, { superuser: "try", err: "message" });
+    const proc = cockpit.spawn(["restic", ...resticArgs], { superuser: "try", err: "message", environ: env });
 
     if (onProgress) {
         proc.stream((data: string) => {
@@ -448,40 +490,53 @@ export async function unlockRepo(repo: string, passwordFile: string, envVars?: R
 
 // --- Configuration management ---
 
-export async function loadJobs(): Promise<BackupJob[]> {
+// Config files whose last read succeeded (a missing file counts). Saving one that
+// could not be read, e.g. without administrative access, would overwrite it.
+const readableConfig = new Set<string>();
+
+async function loadConfig<T>(path: string): Promise<T[]> {
     try {
-        const content = await cockpit.file(JOBS_FILE, { superuser: "try" }).read();
-        return content ? JSON.parse(content) : [];
+        const content = await cockpit.file(path, { superuser: "try" }).read();
+        const items = content ? JSON.parse(content) : [];
+        readableConfig.add(path);
+        return items;
     } catch {
+        readableConfig.delete(path);
         return [];
     }
+}
+
+function assertConfigReadable(path: string): void {
+    if (!readableConfig.has(path))
+        throw new Error(`${path} could not be read; it was left unchanged`);
+}
+
+export async function loadJobs(): Promise<BackupJob[]> {
+    return loadConfig<BackupJob>(JOBS_FILE);
 }
 
 export async function saveJobs(jobs: BackupJob[]): Promise<void> {
-    await cockpit.spawn(["mkdir", "-p", CONFIG_DIR], { superuser: "try" });
-    await cockpit.file(JOBS_FILE, { superuser: "try" }).replace(JSON.stringify(jobs, null, 2));
+    assertConfigReadable(JOBS_FILE);
+    await makePrivateDir(CONFIG_DIR);
+    await writePrivateFile(JOBS_FILE, JSON.stringify(jobs, null, 2));
 }
 
 export async function loadDestinations(): Promise<Destination[]> {
-    try {
-        const content = await cockpit.file(DESTINATIONS_FILE, { superuser: "try" }).read();
-        return content ? JSON.parse(content) : [];
-    } catch {
-        return [];
-    }
+    return loadConfig<Destination>(DESTINATIONS_FILE);
 }
 
 export async function saveDestinations(destinations: Destination[]): Promise<void> {
-    await cockpit.spawn(["mkdir", "-p", CONFIG_DIR], { superuser: "try" });
-    await cockpit.file(DESTINATIONS_FILE, { superuser: "try" }).replace(JSON.stringify(destinations, null, 2));
+    assertConfigReadable(DESTINATIONS_FILE);
+    await makePrivateDir(CONFIG_DIR);
+    await writePrivateFile(DESTINATIONS_FILE, JSON.stringify(destinations, null, 2));
 }
 
 // Create a password file for a repository
 export async function createPasswordFile(id: string, password: string): Promise<string> {
     const filePath = `${PASSWORDS_DIR}/${id}`;
-    await cockpit.spawn(["mkdir", "-p", PASSWORDS_DIR], { superuser: "try" });
-    await cockpit.file(filePath, { superuser: "try" }).replace(password);
-    await cockpit.spawn(["chmod", "600", filePath], { superuser: "try" });
+    await makePrivateDir(CONFIG_DIR);
+    await makePrivateDir(PASSWORDS_DIR);
+    await writePrivateFile(filePath, password);
     return filePath;
 }
 
@@ -502,18 +557,19 @@ export async function enableJobSchedule(job: BackupJob): Promise<void> {
     const destinations = await loadDestinations();
     const dest = destinations.find(d => d.path === job.repository);
 
-    // Build environment lines
-    const envLines: string[] = [
-        systemdEnvironmentLine("RESTIC_REPOSITORY", job.repository),
-        systemdEnvironmentLine("RESTIC_PASSWORD_FILE", job.password_file),
+    const env: string[] = [
+        `RESTIC_REPOSITORY=${job.repository}`,
+        `RESTIC_PASSWORD_FILE=${job.password_file}`,
     ];
     if (dest?.env_vars) {
         for (const [key, val] of Object.entries(dest.env_vars)) {
             if (key !== '_SSH_KEY') {
-                envLines.push(systemdEnvironmentLine(key, val));
+                env.push(`${key}=${val}`);
             }
         }
     }
+    const environmentFile = `${ENV_DIR}/${job.id}`;
+    await writeEnvironmentFile(environmentFile, env);
 
     // Build the restic command arguments
     const args: string[] = ["backup", "--json"];
@@ -572,7 +628,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-${envLines.join('\n')}
+EnvironmentFile=${environmentFile}
 ExecStartPre=${execStartPre}
 ExecStart=${execStart}
 `;
@@ -605,7 +661,8 @@ export async function disableJobSchedule(job: BackupJob): Promise<void> {
         await cockpit.spawn(["systemctl", "disable", "--now", `${serviceName}.timer`], { superuser: "try" });
         await cockpit.spawn(["rm", "-f",
             `${SYSTEMD_DIR}/${serviceName}.service`,
-            `${SYSTEMD_DIR}/${serviceName}.timer`
+            `${SYSTEMD_DIR}/${serviceName}.timer`,
+            `${ENV_DIR}/${job.id}`
         ], { superuser: "try" });
         await cockpit.spawn(["systemctl", "daemon-reload"], { superuser: "try" });
     } catch { /* timer might not exist */ }

@@ -46,8 +46,7 @@ async function lsSnapshot(
     for (const dest of destinations) {
         try {
             assertValidRepository(dest.path);
-            const cmd = [
-                "env",
+            const environ = [
                 `RESTIC_REPOSITORY=${dest.path}`,
                 `RESTIC_PASSWORD_FILE=${dest.password_file}`,
             ];
@@ -59,12 +58,12 @@ async function lsSnapshot(
                         resticArgs.push(...buildSftpCommandOption(dest.path, val));
                     } else if (key !== '_SSH_KEY') {
                         assertValidEnvironmentVariable(key, val);
-                        cmd.push(`${key}=${val}`);
+                        environ.push(`${key}=${val}`);
                     }
                 }
             }
-            cmd.push("restic", ...resticArgs, "ls", "--json", "--", snapshotId, path);
-            const output = await cockpit.spawn(cmd, { superuser: "try", err: "message" });
+            const output = await cockpit.spawn(["restic", ...resticArgs, "ls", "--json", "--", snapshotId, path],
+                                               { superuser: "try", err: "message", environ });
             const entries: FileEntry[] = [];
             for (const line of output.trim().split('\n')) {
                 if (!line) continue;
