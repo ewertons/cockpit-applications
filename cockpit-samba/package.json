@@ -7,7 +7,7 @@
   "author": "",
   "license": "LGPL-2.1",
   "engines": {
-    "node": ">= 16"
+    "node": ">= 20"
   },
   "scripts": {
     "watch": "ESBUILD_WATCH='true' ./build.js",

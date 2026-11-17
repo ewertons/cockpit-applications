@@ -165,13 +165,13 @@ export async function listLinuxGroups(): Promise<LinuxAccount[]> {
     return parseGetent(await cockpit.spawn(["getent", "group"], { err: "message" }), "group");
 }
 
-/**
- * Adds a Samba account.
- * @param createSystemUser first create a Linux system user without login shell or home.
- */
-export async function addSambaUser(userName: string, password: string, createSystemUser: boolean): Promise<void> {
-    if (createSystemUser)
-        await run(createSystemUserCommand(userName));
+/** Creates a Linux system user without login shell or home, for Samba-only access. */
+export async function createSystemUser(userName: string): Promise<void> {
+    await run(createSystemUserCommand(userName));
+}
+
+/** Adds a Samba account for an existing Linux user. */
+export async function addSambaUser(userName: string, password: string): Promise<void> {
     await run(addSambaUserCommand(userName), passwordInput(password));
 }
 

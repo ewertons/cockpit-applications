@@ -259,6 +259,9 @@ function setMatchingValues(document: ConfigurationDocument, sectionName: string,
 
     const lists = sectionLineLists(result, sectionName);
     const remaining = [...values];
+    // A single value goes on the last assignment, which is the effective one (it may follow an include).
+    const matchCount = lists.flat().filter(line => line.kind === "parameter" && matcher(line.name).matched).length;
+    let leadingToRemove = values.length === 1 ? matchCount - 1 : 0;
     let lastList = lists[lists.length - 1];
     let insertAfter = -1;
     for (const list of lists) {
@@ -272,7 +275,8 @@ function setMatchingValues(document: ConfigurationDocument, sectionName: string,
                 insertAfter = index;
                 continue;
             }
-            if (remaining.length === 0) {
+            if (remaining.length === 0 || leadingToRemove > 0) {
+                leadingToRemove--;
                 list.splice(index, 1);
                 index--;
                 continue;

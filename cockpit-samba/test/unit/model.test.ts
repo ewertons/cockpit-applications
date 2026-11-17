@@ -62,6 +62,13 @@ describe("model", () => {
         assert.equal(isShareEnabled(setShareEnabled(document, "Data", false), "Data"), false);
     });
 
+    test("enabling a share writes yes when [global] disables shares", () => {
+        const disabledByDefault = parseConfiguration("[global]\n available = no\n[data]\n path = /srv/data\n");
+        const enabled = setShareEnabled(disabledByDefault, "data", true);
+        assert.equal(isShareEnabled(enabled, "data"), true);
+        assert.match(serializeConfiguration(enabled), /\[data\]\n path = \/srv\/data\n available = yes\n/);
+    });
+
     test("printing switch writes and removes the usual parameters", () => {
         assert.equal(isPrintingEnabled(document), true);
         const off = setPrintingEnabled(document, false);

@@ -114,9 +114,15 @@ export function isShareEnabled(document: ConfigurationDocument, shareName: strin
     return effectiveShareBoolean(document, shareName, "available", true);
 }
 
-/** @returns the document with the share enabled (parameter removed) or disabled (`available = no`). */
+/**
+ * @returns the document with the share disabled (`available = no`) or enabled:
+ * the parameter is removed, or set to yes when [global] disables shares.
+ */
 export function setShareEnabled(document: ConfigurationDocument, shareName: string, enabled: boolean): ConfigurationDocument {
-    return setParameter(document, shareName, "available", enabled ? null : "no");
+    if (!enabled)
+        return setParameter(document, shareName, "available", "no");
+    const globalAvailable = parseBoolean(getParameter(document, GLOBAL_SECTION, "available") ?? "yes");
+    return setParameter(document, shareName, "available", globalAvailable === false ? "yes" : null);
 }
 
 /** @returns whether printer shares are loaded (`load printers` not "no"). */

@@ -336,11 +336,3 @@ updates:
       # whole eslint* family has to stay on the 8.x generation.
       - dependency-name: "eslint*"
         update-types: ["version-update:semver-major"]
-
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    open-pull-requests-limit: 3
-    labels:
-      - "no-test"
-    schedule:
-      interval: "weekly"

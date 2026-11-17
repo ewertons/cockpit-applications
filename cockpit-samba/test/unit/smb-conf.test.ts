@@ -177,9 +177,15 @@ describe("editing parameters", () => {
         assert.equal(serializeConfiguration(document), "[s]\n   writeable = no\n");
     });
 
-    test("duplicates and synonyms collapse into one line", () => {
+    test("duplicates and synonyms collapse into the last, effective line", () => {
         const document = setParameter(parseConfiguration("[s]\n read only = yes\n path = /x\n writable = yes\n"), "s", "read only", "no");
-        assert.equal(serializeConfiguration(document), "[s]\n read only = no\n path = /x\n");
+        assert.equal(serializeConfiguration(document), "[s]\n path = /x\n writable = yes\n");
+    });
+
+    test("an edit stays after an include that sets the same parameter", () => {
+        const text = "[global]\n workgroup = A\n include = /etc/samba/extra.conf\n workgroup = B\n";
+        const document = setParameter(parseConfiguration(text), "global", "workgroup", "C");
+        assert.equal(serializeConfiguration(document), "[global]\n include = /etc/samba/extra.conf\n workgroup = C\n");
     });
 
     test("new parameters go after the last parameter, with the section's indentation", () => {

@@ -86,18 +86,23 @@ const BOOLEAN_CHOICES = ["yes", "no"];
 
 /**
  * Widget for one known parameter. An empty value (or "Default") removes the
- * parameter so Samba's default applies.
+ * parameter so the inherited [global] value or Samba's default applies.
  */
-export const ParameterFieldInput = ({ field, value, onChange, fieldId, extraHelp, children }: {
+export const ParameterFieldInput = ({ field, value, inheritedValue, onChange, fieldId, extraHelp, children }: {
     field: ParameterField;
     /** Current value, or undefined when the parameter is not set. */
     value: string | undefined;
+    /** Value set in [global] that a share falls back to, if any. */
+    inheritedValue?: string | undefined;
     onChange: (value: string | null) => void;
     fieldId: string;
     extraHelp?: React.ReactNode;
     children?: React.ReactNode;
 }) => {
     const error = value === undefined || value === "" ? null : validateFieldValue(field, value);
+    const fallbackLabel = inheritedValue !== undefined
+        ? cockpit.format(_("Inherited from [global] ($0)"), inheritedValue)
+        : field.defaultValue ? cockpit.format(_("Default ($0)"), field.defaultValue) : _("Default");
     const helper = (
         <HelperText>
             {error && <HelperTextItem variant="error">{error}</HelperTextItem>}
@@ -113,7 +118,7 @@ export const ParameterFieldInput = ({ field, value, onChange, fieldId, extraHelp
         return (
             <FormGroup label={_(field.label)} fieldId={fieldId}>
                 <FormSelect id={fieldId} value={selected} onChange={(_event, chosen) => onChange(chosen === "" ? null : chosen)}>
-                    <FormSelectOption value="" label={cockpit.format(_("Default ($0)"), field.defaultValue)} />
+                    <FormSelectOption value="" label={fallbackLabel} />
                     {!known && <FormSelectOption value={value} label={value!} />}
                     {choices.map(choice => <FormSelectOption key={choice} value={choice} label={choice} />)}
                 </FormSelect>
@@ -129,7 +134,7 @@ export const ParameterFieldInput = ({ field, value, onChange, fieldId, extraHelp
                 id={fieldId}
                 value={value ?? ""}
                 validated={error ? "error" : "default"}
-                {...field.defaultValue ? { placeholder: cockpit.format(_("Default: $0"), field.defaultValue) } : {}}
+                {...inheritedValue !== undefined || field.defaultValue ? { placeholder: fallbackLabel } : {}}
                 onChange={(_event, text) => onChange(text === "" ? null : text)}
             />
             {helper}

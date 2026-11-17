@@ -18,7 +18,7 @@ PACKAGE_NAME="cockpit-samba"
 echo "==> Checking prerequisites..."
 
 # Minimum required Node.js major version
-MIN_NODE_VERSION=16
+MIN_NODE_VERSION=20
 
 # Install Node.js and npm if not present
 if ! command -v node &>/dev/null || ! command -v npm &>/dev/null; then

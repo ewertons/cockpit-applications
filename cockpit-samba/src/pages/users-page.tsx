@@ -18,6 +18,7 @@ import { ErrorAlert, PageHeader, SimpleTable } from '../components.jsx';
 import { listShareNames, splitList } from '../model.js';
 import {
     addSambaUser,
+    createSystemUser,
     deleteSambaUser,
     errorMessage,
     listLinuxGroups,
@@ -64,20 +65,35 @@ const AddUserDialog = ({ linuxUsers, sambaUsers, onClose, onDone }: { linuxUsers
     const [confirmation, setConfirmation] = useState("");
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    // Linux user created by this dialog whose Samba step failed; a retry only redoes the Samba step.
+    const [createdLinuxUser, setCreatedLinuxUser] = useState<string | null>(null);
 
     const userName = mode === "existing" ? existing : newName;
-    const nameError = mode === "create" && newName
+    const needsLinuxUser = mode === "create" && newName !== createdLinuxUser;
+    const nameError = needsLinuxUser && newName
         ? validateNewUserName(newName) ?? (linuxUsers.some(user => user.name === newName) ? "A Linux user with this name exists; choose \"Existing Linux user\"" : null)
         : null;
     const valid = userName !== "" && !nameError && validatePassword(password, confirmation) === null;
 
-    const submit = () => {
+    const submit = async () => {
         setBusy(true);
         setError(null);
-        addSambaUser(userName, password, mode === "create")
-                .then(onDone)
-                .catch(addError => setError(errorMessage(addError)))
-                .finally(() => setBusy(false));
+        let linuxUserCreated = mode === "create" && !needsLinuxUser;
+        try {
+            if (needsLinuxUser) {
+                await createSystemUser(userName);
+                linuxUserCreated = true;
+                setCreatedLinuxUser(userName);
+            }
+            await addSambaUser(userName, password);
+            onDone();
+        } catch (addError) {
+            setError(linuxUserCreated
+                ? cockpit.format(_("Linux user $0 was created, but adding the Samba account failed: $1"), userName, errorMessage(addError))
+                : errorMessage(addError));
+        } finally {
+            setBusy(false);
+        }
     };
 
     return (
@@ -87,7 +103,7 @@ const AddUserDialog = ({ linuxUsers, sambaUsers, onClose, onDone }: { linuxUsers
                 <ErrorAlert error={error} />
                 <Form onSubmit={event => event.preventDefault()}>
                     <FormGroup role="radiogroup" label={_("Account")} fieldId="user-mode" isStack>
-                        <Radio id="user-mode-existing" name="user-mode" label={_("Existing Linux user")} isChecked={mode === "existing"} isDisabled={candidates.length === 0} onChange={() => setMode("existing")} />
+                        <Radio id="user-mode-existing" name="user-mode" label={_("Existing Linux user")} isChecked={mode === "existing"} isDisabled={candidates.length === 0 || createdLinuxUser !== null} onChange={() => setMode("existing")} />
                         <Radio
                             id="user-mode-create" name="user-mode" isChecked={mode === "create"} onChange={() => setMode("create")}
                             label={_("New system user without login (Samba only, e.g. for a scanner)")}
@@ -102,14 +118,14 @@ const AddUserDialog = ({ linuxUsers, sambaUsers, onClose, onDone }: { linuxUsers
                             </FormGroup>)
                         : (
                             <FormGroup label={_("User name")} fieldId="user-new" isRequired>
-                                <TextInput id="user-new" value={newName} validated={nameError ? "error" : "default"} onChange={(_event, text) => setNewName(text)} />
+                                <TextInput id="user-new" value={newName} validated={nameError ? "error" : "default"} isDisabled={createdLinuxUser !== null} onChange={(_event, text) => setNewName(text)} />
                                 {nameError && <HelperText><HelperTextItem variant="error">{_(nameError)}</HelperTextItem></HelperText>}
                             </FormGroup>)}
                     <PasswordFields password={password} confirmation={confirmation} onPassword={setPassword} onConfirmation={setConfirmation} />
                 </Form>
             </ModalBody>
             <ModalFooter>
-                <Button variant="primary" isDisabled={!valid || busy} isLoading={busy} onClick={submit}>{_("Add")}</Button>
+                <Button variant="primary" isDisabled={!valid || busy} isLoading={busy} onClick={() => { submit() }}>{_("Add")}</Button>
                 <Button variant="link" isDisabled={busy} onClick={onClose}>{_("Cancel")}</Button>
             </ModalFooter>
         </Modal>

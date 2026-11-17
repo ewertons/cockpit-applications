@@ -22,9 +22,13 @@ import {
     snapshotScriptText,
 } from "../../src/transaction.ts";
 
-// testparm stub: rejects files containing "INVALID", reports "bogus" lines as unknown parameters.
+// testparm stub: rejects files containing "INVALID", reports "bogus" lines as unknown parameters,
+// and for "RACE" edits the smb.conf next to the candidate, as an external editor would.
 const TESTPARM_STUB = `#!/bin/sh
 file="$2"
+if grep -q RACE "$file"; then
+    echo "edited elsewhere" >> "$(dirname "$file")/smb.conf"
+fi
 echo "Load smb config files from $file" >&2
 if grep -q INVALID "$file"; then
     echo "ERROR: Invalid value for parameter" >&2
@@ -170,6 +174,28 @@ describe("apply", () => {
         assert.equal(result.status, ExitCode.changedElsewhere);
         assert.equal(fs.readFileSync(paths.configurationPath, "utf8"), OLD);
         assert.equal(runScript(applyScriptText(paths), NEW, []).status, ExitCode.changedElsewhere);
+    });
+
+    test("refuses when the file changes while testparm runs", () => {
+        writeConfiguration(OLD);
+        const result = runScript(applyScriptText(paths), "[global]\n# RACE\n", [sha256(OLD)]);
+        assert.equal(result.status, ExitCode.changedElsewhere);
+        assert.equal(fs.readFileSync(paths.configurationPath, "utf8"), OLD + "edited elsewhere\n");
+        assert.deepEqual(backupNames(), []);
+        assert.deepEqual(fs.readdirSync(path.join(root, "etc")), ["smb.conf"]);
+    });
+
+    test("a symlinked smb.conf keeps the link and updates its target", () => {
+        fs.mkdirSync(path.join(root, "real"));
+        const target = path.join(root, "real", "smb.conf");
+        fs.writeFileSync(target, OLD);
+        fs.symlinkSync("../real/smb.conf", paths.configurationPath);
+        const result = runScript(applyScriptText(paths), NEW, [sha256(OLD)]);
+        assert.equal(result.status, 0, result.stderr);
+        assert.ok(fs.lstatSync(paths.configurationPath).isSymbolicLink());
+        assert.equal(fs.readFileSync(target, "utf8"), NEW);
+        assert.equal(fs.readFileSync(path.join(paths.backupDirectory, parseApplyOutput(result.stdout).backupName!), "utf8"), OLD);
+        assert.deepEqual(fs.readdirSync(path.join(root, "real")), ["smb.conf"]);
     });
 
     test("creates a missing file without a backup", () => {

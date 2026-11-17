@@ -42,10 +42,6 @@ export function shellQuote(text: string): string {
     return `'${text.replace(/'/g, `'\\''`)}'`;
 }
 
-function directoryOf(path: string): string {
-    return path.replace(/\/[^/]+$/, "") || "/";
-}
-
 function preamble(paths: TransactionPaths): string[] {
     return [
         "set -eu",
@@ -58,6 +54,18 @@ function preamble(paths: TransactionPaths): string[] {
 
 const HASH_CURRENT = [
     `if [ -e "$config" ]; then current=$(sha256sum < "$config" | cut -d' ' -f1); else current=${ABSENT_HASH}; fi`,
+];
+
+/** Exits with changedElsewhere unless smb.conf still has the hash given as const HASH_CURRENT = [
+    `if [ -e "$config" ]; then current=$(sha256sum < "$config" | cut -d' ' -f1); else current=${ABSENT_HASH}; fi`,
+];
+. */
+const REFUSE_IF_CHANGED = [
+    ...HASH_CURRENT,
+    `if [ "$current" != "\${1:-}" ]; then`,
+    `    echo "smb.conf was changed since it was loaded; reload the page and redo the change" >&2`,
+    `    exit ${ExitCode.changedElsewhere}`,
+    "fi",
 ];
 
 /** @returns the script printing "present <sha256>" and the file, or "absent". */
@@ -111,19 +119,19 @@ export function applyScriptText(paths: TransactionPaths = DEFAULT_PATHS): string
         `mkdir -p "$state"`,
         `exec 9>"$state/lock"`,
         "flock 9",
-        `candidate=$(mktemp ${shellQuote(directoryOf(paths.configurationPath))}/.smb.conf.cockpit-XXXXXX)`,
+        // Replace the target of a symlinked smb.conf, not the link itself.
+        `if [ -L "$config" ]; then config=$(readlink -f -- "$config"); fi`,
+        `candidate=$(mktemp "$(dirname -- "$config")/.smb.conf.cockpit-XXXXXX")`,
         `diagnostics=$(mktemp "$state/apply-diagnostics.XXXXXX")`,
         `trap 'rm -f "$candidate" "$diagnostics"' EXIT`,
         `cat > "$candidate"`,
-        ...HASH_CURRENT,
-        `if [ "$current" != "\${1:-}" ]; then`,
-        `    echo "smb.conf was changed since it was loaded; reload the page and redo the change" >&2`,
-        `    exit ${ExitCode.changedElsewhere}`,
-        "fi",
+        ...REFUSE_IF_CHANGED,
         `if ! testparm -s "$candidate" >/dev/null 2>"$diagnostics"; then`,
         `    cat "$diagnostics" >&2`,
         `    exit ${ExitCode.testparmFailed}`,
         "fi",
+        // External editors do not take the lock: check again after testparm.
+        ...REFUSE_IF_CHANGED,
         `if [ -e "$config" ]; then`,
         `    mkdir -p "$backups"`,
         `    chmod 700 "$backups"`,

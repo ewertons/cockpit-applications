@@ -10,7 +10,7 @@ import { ParameterFieldInput, ParameterRow, ParameterTable, parameterRowError, r
 import { ParameterField, isFieldParameter, joinList, splitList } from '../model.js';
 import { createDirectory, errorMessage, listLinuxGroups, listSambaUsers, readPathInformation } from '../samba-backend.js';
 import { parameterKey } from '../parameters.js';
-import { ConfigurationDocument, getParameter, listParameters, replaceParameters, setParameter } from '../smb-conf.js';
+import { ConfigurationDocument, GLOBAL_SECTION, getParameter, listParameters, replaceParameters, setParameter } from '../smb-conf.js';
 import { validateFieldValue } from '../validation.js';
 import { PathInformation, isWorldWritableMode } from '../warnings.js';
 
@@ -158,10 +158,11 @@ export const SectionForm = ({ draft, sectionName, fields, idPrefix, accounts }: 
         {fields.map(field => {
             const fieldId = `${idPrefix}-${field.parameter.replace(/\s+/g, "-")}`;
             const value = getParameter(draft.fieldDocument, sectionName, field.parameter);
+            const inheritedValue = sectionName === GLOBAL_SECTION ? undefined : getParameter(draft.fieldDocument, GLOBAL_SECTION, field.parameter);
             const onChange = (changed: string | null) => draft.setFieldDocument(document => setParameter(document, sectionName, field.parameter, changed));
             return (
                 <ParameterFieldInput
-                    key={field.parameter} field={field} fieldId={fieldId} value={value} onChange={onChange}
+                    key={field.parameter} field={field} fieldId={fieldId} value={value} inheritedValue={inheritedValue} onChange={onChange}
                     extraHelp={field.kind === "path" ? <PathCheck path={value ?? ""} /> : undefined}
                 >
                     {field.kind === "users" && <AccountPicker fieldId={fieldId} value={value} onChange={onChange} accounts={accounts} />}

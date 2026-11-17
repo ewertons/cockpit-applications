@@ -114,4 +114,8 @@ $(NODE_MODULES_TEST): package.json
 	for _ in `seq 3`; do timeout 10m env -u NODE_ENV npm install --ignore-scripts && exit 0; done; exit 1
 	env -u NODE_ENV npm prune
 
-.PHONY: all clean install devel-install devel-uninstall print-version dist watch
+# checkout Cockpit's bots for the cockpit-lib-update and tasks-container-update workflows
+bots: $(COCKPIT_REPO_STAMP)
+	test/common/make-bots
+
+.PHONY: bots all clean install devel-install devel-uninstall print-version dist watch
