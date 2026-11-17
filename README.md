@@ -12,6 +12,7 @@ A monorepo of [Cockpit](https://cockpit-project.org/) extensions for Linux serve
 | [cockpit-security](cockpit-security/) | Security monitoring and hardening tools |
 | [cockpit-wireguard](cockpit-wireguard/) | Manage WireGuard VPN tunnels and clients |
 | [cockpit-firewall](cockpit-firewall/) | Manage nftables forwarding, NAT and input rules with safe apply |
+| [cockpit-samba](cockpit-samba/) | Manage a Samba file server: settings, shares, users, connections and logs with safe apply |
 
 See each application's README for installation, usage, and development instructions:
 
@@ -21,6 +22,7 @@ See each application's README for installation, usage, and development instructi
 - [cockpit-security/README.md](cockpit-security/README.md)
 - [cockpit-wireguard/README.md](cockpit-wireguard/README.md)
 - [cockpit-firewall/README.md](cockpit-firewall/README.md)
+- [cockpit-samba/README.md](cockpit-samba/README.md)
 
 ## License
 

@@ -57,3 +57,9 @@ jobs:
         run: |
           make bots
           bots/tasks-container-update
+
+      - name: Run tasks-container-update (cockpit-samba)
+        working-directory: cockpit-samba
+        run: |
+          make bots
+          bots/tasks-container-update

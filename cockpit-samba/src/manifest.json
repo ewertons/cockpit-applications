@@ -1,0 +1,19 @@
+{
+    "requires": {
+        "cockpit": "137"
+    },
+
+    "tools": {
+        "samba": {
+            "label": "Samba file server",
+            "path": "index.html",
+            "order": 54
+        }
+    },
+
+    "conditions": [
+        {
+            "path-exists": "/usr/sbin/smbd"
+        }
+    ]
+}

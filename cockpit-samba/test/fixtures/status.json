@@ -1,0 +1,100 @@
+{
+  "timestamp": "2026-11-17T07:18:51.488684+0000",
+  "version": "4.17.12-Debian",
+  "smb_conf": "/srv/samba/smb.conf",
+  "sessions": {
+    "390793392": {
+      "session_id": "390793392",
+      "server_id": {
+        "pid": "1115",
+        "task_id": "0",
+        "vnn": "4294967295",
+        "unique_id": "13739934871296290321"
+      },
+      "uid": 10001,
+      "gid": 10001,
+      "username": "agent",
+      "groupname": "agent",
+      "remote_machine": "127.0.0.1",
+      "hostname": "ipv4:127.0.0.1:43590",
+      "session_dialect": "SMB3_11",
+      "encryption": {
+        "cipher": "-",
+        "degree": "none"
+      },
+      "signing": {
+        "cipher": "AES-128-GMAC",
+        "degree": "partial"
+      }
+    },
+    "1957613806": {
+      "session_id": "1957613806",
+      "server_id": {
+        "pid": "1116",
+        "task_id": "0",
+        "vnn": "4294967295",
+        "unique_id": "11045891793945968679"
+      },
+      "uid": 10001,
+      "gid": 10001,
+      "username": "agent",
+      "groupname": "agent",
+      "remote_machine": "127.0.0.1",
+      "hostname": "ipv4:127.0.0.1:43592",
+      "session_dialect": "NT1",
+      "encryption": {
+        "cipher": "-",
+        "degree": "none"
+      },
+      "signing": {
+        "cipher": "-",
+        "degree": "none"
+      }
+    }
+  },
+  "tcons": {
+    "1304240770": {
+      "service": "share",
+      "server_id": {
+        "pid": "1115",
+        "task_id": "0",
+        "vnn": "4294967295",
+        "unique_id": "13739934871296290321"
+      },
+      "tcon_id": "1304240770",
+      "session_id": "390793392",
+      "machine": "127.0.0.1",
+      "connected_at": "2026-11-17T07:18:49.483740+00:00",
+      "encryption": {
+        "cipher": "-",
+        "degree": "none"
+      },
+      "signing": {
+        "cipher": "-",
+        "degree": "none"
+      }
+    },
+    "2338514457": {
+      "service": "share",
+      "server_id": {
+        "pid": "1116",
+        "task_id": "0",
+        "vnn": "4294967295",
+        "unique_id": "11045891793945968679"
+      },
+      "tcon_id": "2338514457",
+      "session_id": "1957613806",
+      "machine": "127.0.0.1",
+      "connected_at": "2026-11-17T07:18:49.484304+00:00",
+      "encryption": {
+        "cipher": "-",
+        "degree": "none"
+      },
+      "signing": {
+        "cipher": "-",
+        "degree": "none"
+      }
+    }
+  },
+  "open_files": {}
+}

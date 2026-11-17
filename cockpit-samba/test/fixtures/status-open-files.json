@@ -1,0 +1,113 @@
+{
+  "timestamp": "2026-11-17T07:19:00.447288+0000",
+  "version": "4.17.12-Debian",
+  "smb_conf": "/srv/samba/smb.conf",
+  "sessions": {
+    "1061537097": {
+      "session_id": "1061537097",
+      "server_id": {
+        "pid": "1129",
+        "task_id": "0",
+        "vnn": "4294967295",
+        "unique_id": "2931445916906554739"
+      },
+      "uid": 10001,
+      "gid": 10001,
+      "username": "agent",
+      "groupname": "agent",
+      "remote_machine": "127.0.0.1",
+      "hostname": "ipv4:127.0.0.1:53506",
+      "session_dialect": "NT1",
+      "encryption": {
+        "cipher": "-",
+        "degree": "none"
+      },
+      "signing": {
+        "cipher": "-",
+        "degree": "none"
+      }
+    }
+  },
+  "tcons": {
+    "3830186823": {
+      "service": "share",
+      "server_id": {
+        "pid": "1129",
+        "task_id": "0",
+        "vnn": "4294967295",
+        "unique_id": "2931445916906554739"
+      },
+      "tcon_id": "3830186823",
+      "session_id": "1061537097",
+      "machine": "127.0.0.1",
+      "connected_at": "2026-11-17T07:18:58.442636+00:00",
+      "encryption": {
+        "cipher": "-",
+        "degree": "none"
+      },
+      "signing": {
+        "cipher": "-",
+        "degree": "none"
+      }
+    }
+  },
+  "open_files": {
+    "/srv/samba/share/hello.txt": {
+      "service_path": "/srv/samba/share",
+      "filename": "hello.txt",
+      "fileid": {
+        "devid": 78,
+        "inode": 29266831,
+        "extid": 0
+      },
+      "num_pending_deletes": 0,
+      "opens": {
+        "1129/3": {
+          "server_id": {
+            "pid": "1129",
+            "task_id": "0",
+            "vnn": "4294967295",
+            "unique_id": "2931445916906554739"
+          },
+          "uid": 10001,
+          "share_file_id": "3",
+          "sharemode": {
+            "hex": "0x00000003",
+            "READ": true,
+            "WRITE": true,
+            "DELETE": false,
+            "text": "RW"
+          },
+          "access_mask": {
+            "hex": "0x00000003",
+            "READ_DATA": true,
+            "WRITE_DATA": true,
+            "APPEND_DATA": false,
+            "READ_EA": false,
+            "WRITE_EA": false,
+            "EXECUTE": false,
+            "READ_ATTRIBUTES": false,
+            "WRITE_ATTRIBUTES": false,
+            "DELETE_CHILD": false,
+            "DELETE": false,
+            "READ_CONTROL": false,
+            "WRITE_DAC": false,
+            "SYNCHRONIZE": false,
+            "ACCESS_SYSTEM_SECURITY": false,
+            "text": "RW"
+          },
+          "caching": {
+            "READ": false,
+            "WRITE": false,
+            "HANDLE": false,
+            "hex": "0x00000000",
+            "text": ""
+          },
+          "oplock": {},
+          "lease": {},
+          "opened_at": "2026-11-17T07:18:58.443048+00:00"
+        }
+      }
+    }
+  }
+}
