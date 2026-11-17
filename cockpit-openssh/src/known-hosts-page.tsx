@@ -37,10 +37,14 @@ const STATUS_LABELS: Record<string, string> = {
     "skipped-pattern": _("Wildcard pattern, cannot be checked"),
 };
 
+// Accounts can share a home, so a file is selected by account and path together.
+const fileKey = (file: KnownHostsFile) => `${file.owner ?? ""}:${file.path}`;
+
 export const KnownHostsPage = () => {
     const [loading, setLoading] = useState(true);
     const [files, setFiles] = useState<KnownHostsFile[]>([]);
     const [path, setPath] = useState("");
+    const [selectedKey, setSelectedKey] = useState("");
     const [content, setContent] = useState("");
     const [entries, setEntries] = useState<KnownHostEntry[]>([]);
     const [staleBackup, setStaleBackup] = useState(false);
@@ -87,6 +91,7 @@ export const KnownHostsPage = () => {
                 setFiles(found);
                 const first = found.find(f => f.exists) ?? found[0];
                 if (first) {
+                    setSelectedKey(fileKey(first));
                     setPath(first.path);
                     await loadFile(first.path);
                 }
@@ -97,6 +102,8 @@ export const KnownHostsPage = () => {
             setLoading(false);
         })();
     }, [loadFile, loadTimer]);
+
+    const owner = files.find(file => fileKey(file) === selectedKey)?.owner ?? null;
 
     const run = async (id: string, action: () => Promise<void>) => {
         setBusy(id);
@@ -110,10 +117,14 @@ export const KnownHostsPage = () => {
         setBusy(null);
     };
 
-    const selectFile = (target: string) => run("select", async () => {
-        setPath(target);
+    const selectFile = (key: string) => run("select", async () => {
+        const target = files.find(file => fileKey(file) === key);
+        if (!target)
+            return;
+        setSelectedKey(key);
+        setPath(target.path);
         setInfo(null);
-        await loadFile(target);
+        await loadFile(target.path);
     });
 
     const doFind = () => run("find", async () => {
@@ -125,7 +136,7 @@ export const KnownHostsPage = () => {
     });
 
     const doRemoveHost = () => run("remove-host", async () => {
-        await removeHost(path, host);
+        await removeHost(owner, path, host);
         setConfirmRemoveHost(false);
         setInfo(cockpit.format(_("Removed $0. A backup of the previous file was left at $1.old"), host.trim(), path));
         await loadFile(path);
@@ -138,7 +149,7 @@ export const KnownHostsPage = () => {
     const doAddScanned = () => run("add-scanned", async () => {
         if (!scanned)
             return;
-        await appendEntries(path, scanned.map(entry => entry.raw));
+        await appendEntries(owner, path, scanned.map(entry => entry.raw));
         setScanned(null);
         await loadFile(path);
     });
@@ -146,13 +157,13 @@ export const KnownHostsPage = () => {
     const doRemoveEntry = () => run("remove-entry", async () => {
         if (!removingEntry)
             return;
-        await removeEntry(path, removingEntry.raw);
+        await removeEntry(owner, path, removingEntry.raw);
         setRemovingEntry(null);
         await loadFile(path);
     });
 
     const doPurge = () => run("purge", async () => {
-        const backup = await purgeAll(path);
+        const backup = await purgeAll(owner, path);
         setConfirmPurge(false);
         setInfo(cockpit.format(_("All entries removed. The previous file was copied to $0"), backup));
         await loadFile(path);
@@ -163,12 +174,12 @@ export const KnownHostsPage = () => {
     });
 
     const doSaveRaw = () => run("save-raw", async () => {
-        await writeKnownHosts(path, raw, content);
+        await writeKnownHosts(owner, path, raw, content);
         await loadFile(path);
     });
 
     const doDeleteBackup = () => run("delete-backup", async () => {
-        await deleteStaleBackup(path);
+        await deleteStaleBackup(owner, path);
         setStaleBackup(false);
     });
 
@@ -217,13 +228,13 @@ export const KnownHostsPage = () => {
                     <FormGroup label={_("File")} fieldId="ssh-known-hosts-file" className="pf-v6-u-mb-md">
                         <FormSelect
                             id="ssh-known-hosts-file"
-                            value={path}
+                            value={selectedKey}
                             onChange={(_event, value) => selectFile(value)}
                         >
                             {files.map(file => (
                                 <FormSelectOption
-                                    key={file.path}
-                                    value={file.path}
+                                    key={fileKey(file)}
+                                    value={fileKey(file)}
                                     label={file.exists
                                         ? `${file.label} — ${file.path}`
                                         : cockpit.format(_("$0 — $1 (does not exist yet)"), file.label, file.path)}
