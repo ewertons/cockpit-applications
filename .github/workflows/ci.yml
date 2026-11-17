@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        app: [cockpit-git-server, cockpit-backup, cockpit-security, cockpit-openssh, cockpit-wireguard]
+        app: [cockpit-git-server, cockpit-backup, cockpit-security, cockpit-openssh, cockpit-wireguard, cockpit-firewall]
         node-version: [22, 24]
     defaults:
       run:
@@ -60,7 +60,7 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        app: [cockpit-git-server, cockpit-backup, cockpit-security, cockpit-wireguard]
+        app: [cockpit-git-server, cockpit-backup, cockpit-security, cockpit-wireguard, cockpit-firewall]
     defaults:
       run:
         working-directory: ${{ matrix.app }}
@@ -88,7 +88,7 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        app: [cockpit-git-server, cockpit-backup, cockpit-security, cockpit-openssh, cockpit-wireguard]
+        app: [cockpit-git-server, cockpit-backup, cockpit-security, cockpit-openssh, cockpit-wireguard, cockpit-firewall]
     defaults:
       run:
         working-directory: ${{ matrix.app }}
