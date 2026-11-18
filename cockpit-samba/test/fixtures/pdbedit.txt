@@ -1,0 +1,48 @@
+---------------
+Unix username:        agent
+NT username:          
+Account Flags:        [U          ]
+User SID:             S-1-5-21-3412962362-1099634316-451864771-1000
+Primary Group SID:    S-1-5-21-3412962362-1099634316-451864771-513
+Full Name:            
+Home Directory:       \\7D8A4F086DA0\agent
+HomeDir Drive:        
+Logon Script:         
+Profile Path:         \\7D8A4F086DA0\agent\profile
+Domain:               7D8A4F086DA0
+Account desc:         
+Workstations:         
+Munged dial:          
+Logon time:           0
+Logoff time:          Wed, 06 Feb 2036 15:06:39 UTC
+Kickoff time:         Wed, 06 Feb 2036 15:06:39 UTC
+Password last set:    Tue, 17 Nov 2026 07:18:14 UTC
+Password can change:  Tue, 17 Nov 2026 07:18:14 UTC
+Password must change: never
+Last bad password   : 0
+Bad password count  : 0
+Logon hours         : FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+---------------
+Unix username:        scanner
+NT username:          
+Account Flags:        [DU         ]
+User SID:             S-1-5-21-3412962362-1099634316-451864771-1001
+Primary Group SID:    S-1-5-21-3412962362-1099634316-451864771-513
+Full Name:            Office scanner
+Home Directory:       \\7D8A4F086DA0\scanner
+HomeDir Drive:        
+Logon Script:         
+Profile Path:         \\7D8A4F086DA0\scanner\profile
+Domain:               7D8A4F086DA0
+Account desc:         
+Workstations:         
+Munged dial:          
+Logon time:           0
+Logoff time:          Wed, 06 Feb 2036 15:06:39 UTC
+Kickoff time:         Wed, 06 Feb 2036 15:06:39 UTC
+Password last set:    Tue, 17 Nov 2026 07:18:14 UTC
+Password can change:  Tue, 17 Nov 2026 07:18:14 UTC
+Password must change: never
+Last bad password   : 0
+Bad password count  : 0
+Logon hours         : FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF

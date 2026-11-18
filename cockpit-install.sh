@@ -20,7 +20,8 @@ for arg in "$@"; do
             echo ""
             echo "  --add-applications   Also build and install all cockpit applications"
             echo "                       (cockpit-backup, cockpit-git-server, cockpit-openssh,"
-            echo "                       cockpit-security, cockpit-wireguard, cockpit-firewall)"
+            echo "                       cockpit-security, cockpit-wireguard, cockpit-firewall,"
+            echo "                       cockpit-samba)"
             echo "  --local-only         Listen on 127.0.0.1:9090 only (reach it through an SSH"
             echo "                       tunnel), refuse logins to other hosts and as root, and"
             echo "                       end idle sessions after 15 minutes"
@@ -182,7 +183,7 @@ if $INSTALL_APPS; then
     echo "==> Installing all cockpit applications..."
     echo "============================================"
 
-    APPS=("cockpit-backup" "cockpit-git-server" "cockpit-openssh" "cockpit-security" "cockpit-wireguard" "cockpit-firewall")
+    APPS=("cockpit-backup" "cockpit-git-server" "cockpit-openssh" "cockpit-security" "cockpit-wireguard" "cockpit-firewall" "cockpit-samba")
 
     for app in "${APPS[@]}"; do
         APP_DIR="$SCRIPT_DIR/$app"

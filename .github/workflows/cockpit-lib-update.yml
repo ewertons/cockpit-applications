@@ -53,3 +53,9 @@ jobs:
         run: |
           make bots
           bots/cockpit-lib-update
+
+      - name: Run cockpit-lib-update (cockpit-samba)
+        working-directory: cockpit-samba
+        run: |
+          make bots
+          bots/cockpit-lib-update

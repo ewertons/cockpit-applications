@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        app: [cockpit-git-server, cockpit-backup, cockpit-security, cockpit-openssh, cockpit-wireguard, cockpit-firewall]
+        app: [cockpit-git-server, cockpit-backup, cockpit-security, cockpit-openssh, cockpit-wireguard, cockpit-firewall, cockpit-samba]
         node-version: [22, 24]
     defaults:
       run:
@@ -63,7 +63,7 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        app: [cockpit-git-server, cockpit-backup, cockpit-security, cockpit-wireguard, cockpit-firewall]
+        app: [cockpit-git-server, cockpit-backup, cockpit-security, cockpit-wireguard, cockpit-firewall, cockpit-samba]
     defaults:
       run:
         working-directory: ${{ matrix.app }}
@@ -87,11 +87,34 @@ jobs:
       - name: Unit tests
         run: npm test
 
+  samba-integration:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: cockpit-samba
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install Samba
+        run: sudo apt-get update && sudo apt-get install -y samba
+
+      - name: Install npm dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Apply flow against real testparm and smbd
+        run: npm run test:samba
+
   lint:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        app: [cockpit-git-server, cockpit-backup, cockpit-security, cockpit-openssh, cockpit-wireguard, cockpit-firewall]
+        app: [cockpit-git-server, cockpit-backup, cockpit-security, cockpit-openssh, cockpit-wireguard, cockpit-firewall, cockpit-samba]
     defaults:
       run:
         working-directory: ${{ matrix.app }}
