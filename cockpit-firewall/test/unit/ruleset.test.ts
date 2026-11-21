@@ -230,6 +230,31 @@ describe("reading the table back", () => {
         assert.equal(parsed.configuration.zones[0].forwardPolicy, "accept");
     });
 
+    test("an unexpected chain priority makes the chain unrecognized; numeric standard priorities are accepted", () => {
+        const text = generateRuleset(scenarioConfiguration()).text;
+        const numeric = parseManagedTable(text.replace("priority filter;", "priority 0;").replace("priority srcnat;", "priority 100;"));
+        assert.deepEqual(numeric?.unrecognized, []);
+        const shifted = parseManagedTable(text.replace("hook forward priority filter;", "hook forward priority -150;"));
+        assert.ok(shifted);
+        assert.equal(shifted.unrecognized.length, 1, shifted.unrecognized.join("\n"));
+        assert.match(shifted.unrecognized[0], /^chain forward /);
+        assert.deepEqual(shifted.configuration.forwardRules, []);
+    });
+
+    test("rules carrying a generated comment are skipped only when they match the generated text", () => {
+        const configuration = { ...scenarioConfiguration(), allowManagementAccess: true, inputRules: [
+            { from: {}, service: "http", action: "accept" as const, enabled: true },
+        ] };
+        const text = generateRuleset(configuration).text;
+        assert.deepEqual(parseManagedTable(text.replace(/(iifname "lo") accept/, "$1 counter packets 4 bytes 240 accept"))?.unrecognized, []);
+        const edited = parseManagedTable(text
+                .replace(/ct state established,related accept/, "ct state established,related,new accept")
+                .replace(/tcp dport \{ 22, 9090 \} accept/, "tcp dport { 22, 9090, 3306 } accept"));
+        assert.ok(edited);
+        assert.equal(edited.unrecognized.length, 2, edited.unrecognized.join("\n"));
+        assert.equal(edited.configuration.allowManagementAccess, false);
+    });
+
     test("only an IPv4/IPv6 pair is merged; repeated rules stay separate", () => {
         const configuration = scenarioConfiguration();
         configuration.hosts.push({ name: "dual", addresses: ["192.168.1.10", "fd00::10"], origin: "manual" });

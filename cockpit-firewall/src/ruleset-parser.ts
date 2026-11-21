@@ -19,17 +19,22 @@ import {
     Zone,
     createEmptyConfiguration,
 } from './model.js';
-import { Statement, Token, blockBody, bodyStatements, topLevelTables, words } from './nft-syntax.js';
+import { Statement, Token, blockBody, bodyStatements, tokenize, topLevelTables, words } from './nft-syntax.js';
 import {
     BASELINE_COMMENT,
+    ChainRule,
     DISABLED_CHAIN_SUFFIX,
+    ESTABLISHED,
     HOST_SET_PREFIXES,
+    INPUT_BASELINE_RULES,
     MANAGEMENT_COMMENT,
+    MANAGEMENT_RULE,
     SERVICE_SET_PREFIX,
     WIREGUARD_HOST_COMMENT_PREFIX,
     ZONE_POLICY_COMMENT,
     ZONE_SET_PREFIX,
     isUnchangedBuiltInService,
+    renderRule,
 } from './ruleset.js';
 import { AddressFamily, isValidInterfaceName, isValidObjectName, isValidPort, isValidPublicKey, parseAddress } from './validation.js';
 
@@ -134,6 +139,35 @@ function ruleComment(tokens: Token[]): string | undefined {
     return index === -1 ? undefined : tokens[index + 1].text;
 }
 
+/** @returns a comparison key for rule tokens: every token, without counters and their values. */
+function ruleKey(tokens: Token[]): string {
+    const kept: string[] = [];
+    for (let index = 0; index < tokens.length; index++) {
+        const token = tokens[index];
+        if (token.kind === "newline")
+            continue;
+        if (token.kind === "word" && token.text === "counter") {
+            if (tokens[index + 1]?.text === "packets" && tokens[index + 3]?.text === "bytes")
+                index += 4;
+            continue;
+        }
+        kept.push(`${token.kind}:${token.text}`);
+    }
+    return kept.join(" ");
+}
+
+const chainRuleKey = (rule: ChainRule) => ruleKey(tokenize(renderRule(rule)));
+const ESTABLISHED_KEY = chainRuleKey(ESTABLISHED);
+const INPUT_BASELINE_KEYS = new Set([ESTABLISHED_KEY, ...INPUT_BASELINE_RULES.map(chainRuleKey)]);
+const MANAGEMENT_KEY = chainRuleKey(MANAGEMENT_RULE);
+
+/** Expected `type` declaration of each base chain; nft lists standard priorities by name or number. */
+const EXPECTED_CHAIN_TYPES: Record<string, { hook: string; priorities: string[] }> = {
+    forward: { hook: "filter forward", priorities: ["filter", "0"] },
+    input: { hook: "filter input", priorities: ["filter", "0"] },
+    postrouting: { hook: "nat postrouting", priorities: ["srcnat", "100"] },
+};
+
 /** @returns the comma-separated elements of `elements = { ... }`, each as its token texts joined by spaces. */
 function setElements(statement: Statement): string[] {
     const body = blockBody(statement) ?? [];
@@ -155,6 +189,8 @@ function setElements(statement: Statement): string[] {
 interface ChainContent {
     rules: { statement: Statement; tokens: Token[] }[];
     hook?: string;
+    /** The `type` statement has another form or priority than this app writes. */
+    unexpectedDeclaration?: boolean;
 }
 
 class TableReader {
@@ -253,8 +289,11 @@ class TableReader {
         for (const inner of bodyStatements(this.source, blockBody(statement) ?? [])) {
             const texts = words(inner);
             if (texts[0] === "type") {
-                const hookIndex = texts.indexOf("hook");
-                content.hook = `${texts[1]} ${texts[hookIndex + 1]}`;
+                const expected = EXPECTED_CHAIN_TYPES[name];
+                const declared = texts.length === 6 && texts[2] === "hook" && texts[4] === "priority";
+                content.hook = declared ? `${texts[1]} ${texts[3]}` : texts.join(" ");
+                if (!declared || !expected?.priorities.includes(texts[5]))
+                    content.unexpectedDeclaration = true;
             } else if (texts[0] === "policy") {
                 if (texts[1] !== "accept")
                     this.unrecognized.push(this.describe(`chain ${name}`, inner));
@@ -266,9 +305,6 @@ class TableReader {
 
     /** Converts the collected chains into rules. Call after every table body was read. */
     finish(): ParsedRuleset {
-        const expectedHooks: Record<string, string | undefined> = {
-            forward: "filter forward", input: "filter input", postrouting: "nat postrouting",
-        };
         let inputChainSeen = false;
         let managementSeen = false;
         const enabled = { forward: [] as ForwardRule[], input: [] as InputRule[], postrouting: [] as NatRule[] };
@@ -277,7 +313,8 @@ class TableReader {
         for (const [chainName, content] of this.chains) {
             const baseName = chainName.endsWith(DISABLED_CHAIN_SUFFIX) ? chainName.slice(0, -DISABLED_CHAIN_SUFFIX.length) : chainName;
             const isDisabled = baseName !== chainName;
-            if (!(baseName in expectedHooks) || (isDisabled ? content.hook !== undefined : content.hook !== expectedHooks[baseName])) {
+            const expected = EXPECTED_CHAIN_TYPES[baseName];
+            if (!expected || (isDisabled ? content.hook !== undefined : content.hook !== expected.hook || content.unexpectedDeclaration)) {
                 this.unrecognized.push(`chain ${chainName} (${content.rules.length} rules)`);
                 continue;
             }
@@ -287,10 +324,12 @@ class TableReader {
             // Key of the previous rule when it was the IPv4 half of a possible IPv4/IPv6 pair.
             let pendingIpv4Key: string | null = null;
             for (const { statement, tokens } of content.rules) {
+                // Generated rules are skipped only when they are exactly what the generator writes.
                 const comment = ruleComment(tokens);
-                if (!isDisabled && comment === BASELINE_COMMENT)
+                const generatedKey = comment === BASELINE_COMMENT || comment === MANAGEMENT_COMMENT ? ruleKey(tokens) : "";
+                if (!isDisabled && comment === BASELINE_COMMENT && (kind === "input" ? INPUT_BASELINE_KEYS.has(generatedKey) : kind === "forward" && generatedKey === ESTABLISHED_KEY))
                     continue;
-                if (!isDisabled && kind === "input" && comment === MANAGEMENT_COMMENT) {
+                if (!isDisabled && kind === "input" && comment === MANAGEMENT_COMMENT && generatedKey === MANAGEMENT_KEY) {
                     managementSeen = true;
                     continue;
                 }

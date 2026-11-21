@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { describe, test } from "node:test";
 
 import { parseForeignTables, foreignTableWarnings } from "../../src/coexistence.ts";
@@ -186,6 +187,23 @@ describe("transaction scripts", () => {
         const removing = applyScriptText(false, true);
         assert.match(removing, /'table inet filter' 'delete table inet filter'/);
         assert.match(removing, /nft list table inet filter 2>\/dev\/null \|\| true/);
+    });
+
+    test("removing the stock table re-checks the live table under the lock, before loading", () => {
+        const removing = applyScriptText(false, true);
+        const checkStart = removing.indexOf("if stock_table=$(nft list table inet filter");
+        assert.ok(checkStart > removing.indexOf("flock 9") && checkStart < removing.indexOf("nft -f "));
+        assert.doesNotMatch(apply, /stock_table/);
+        const lines = removing.slice(checkStart).split("\n");
+        const check = lines.slice(0, lines.indexOf("fi") + 1).join("\n");
+        const run = (listing: string | null) => spawnSync("sh", ["-c", `set -eu\nnft() { ${listing === null ? "return 1" : "printf '%s' \"$LISTING\""}; }\n${check}`],
+                                                          { env: { ...process.env, LISTING: listing ?? "" } }).status;
+        const chain = (policy: string, rules = "") => `\tchain input {\n\t\ttype filter hook input priority filter; policy ${policy};\n${rules}\t}\n`;
+        assert.equal(run(null), 0);
+        assert.equal(run(`table inet filter {\n${chain("accept")}\tchain forward {\n\t\ttype filter hook forward priority 0; policy accept;\n\t}\n}\n`), 0);
+        assert.equal(run(`table inet filter {\n${chain("drop")}}\n`), 11);
+        assert.equal(run(`table inet filter {\n${chain("accept", "\t\ttcp dport 22 drop\n")}}\n`), 11);
+        assert.equal(run(`table inet filter {\n\tset blocked {\n\t\ttype ipv4_addr\n\t}\n}\n`), 11);
     });
 
     test("every script except status serializes on the transaction lock", () => {

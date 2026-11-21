@@ -24,7 +24,7 @@ WireGuard `PostUp` hooks.
 - **NAT**: masquerade an IPv4 source CIDR (and/or zone) out of an egress zone
 - **Input rules**: what may reach the host itself, optionally limited to one destination address of the host; SSH (22) and Cockpit (9090) stay reachable unless explicitly disabled (with a warning); once disabled, that rule is not added back
 - **Rule comments**: free text stored as the nftables `comment` of the rule
-- **WireGuard import (read-only)**: peers from `/etc/wireguard/*.conf` become hosts, named from the `# Name =` comment or a `# <name> (access: ...)` comment above `[Peer]` (blank lines in between are ignored) (unnamed peers: `<interface>-peer-<PublicKey prefix>`), addressed from `AllowedIPs`; the interface's `ListenPort` gets an input accept rule; re-imports list hosts removed or now held by a different peer
+- **WireGuard import (read-only)**: peers from `/etc/wireguard/*.conf` become hosts, named from the `# Name =` comment or a `# <name> (access: ...)` comment above `[Peer]` (blank lines in between are ignored) (unnamed peers: `<interface>-peer-<PublicKey prefix>`), addressed from `AllowedIPs`; the interface's `ListenPort` gets an input accept rule (its own `wireguard-<interface>` service for non-default ports; a user service of that name is never changed, a `-2`, `-3`... suffix is used instead); re-imports list hosts removed or now held by a different peer
 - **Safe apply**: validate, preview diff, atomic apply, automatic rollback after 60 s unless confirmed
 - **Coexistence**: other tables, live and in `/etc/nftables.conf`, are listed read-only, with warnings; running firewalld/ufw is detected
 - **IP forwarding**: `net.ipv4.ip_forward=1` is set (and persisted in `/etc/sysctl.d/90-cockpit-firewall.conf`) when any forward or NAT rule exists
@@ -108,7 +108,9 @@ file (for example fail2ban's `inet f2b-table`). Such tools must add their tables
 again after an nftables reload, as they do at their own start.
 
 If the file holds the stock accept-all `table inet filter`, **Status & apply**
-offers to remove it (from the file and the live ruleset). Any other content is
+offers to remove it (from the file and the live ruleset). The server checks the
+live table again before removing it and refuses if it has gained rules, sets or a
+drop policy. Any other content is
 kept as is and shown read-only in **Other tables**.
 
 ### Safe apply

@@ -136,33 +136,56 @@ export function requiresForwarding(configuration: FirewallConfiguration): boolea
 
 /**
  * Makes the input rule accepting a WireGuard interface's listen port match `port`.
- * Port 51820 uses the built-in "wireguard" service; other ports use a
- * "wireguard-<label>" service, whose ports are set to `port`. The rule added by an
- * earlier import (comment "WireGuard <label>") is switched to that service; otherwise
- * a rule accepting it from anywhere is appended unless a rule already uses the service.
- * A "wireguard-<label>" service left unused is removed.
+ * Port 51820 uses the built-in "wireguard" service. Other ports use a service the
+ * import owns: the one an earlier import's rule (comment "WireGuard <label>") uses
+ * when no other rule references it, else "wireguard-<label>" or the first free
+ * "wireguard-<label>-<n>". A user service is never changed; it is only reused when it
+ * already accepts exactly udp/`port`. The imported rule is switched to that service;
+ * otherwise a rule accepting it from anywhere is appended unless a rule already uses it.
+ * An owned service left unused is removed.
  * @returns the updated configuration.
  */
 export function addWireguardListenRule(configuration: FirewallConfiguration, port: number, label: string): FirewallConfiguration {
     const builtIn = BUILT_IN_SERVICES.find(service => service.name === "wireguard")!;
     const labelServiceName = `wireguard-${label}`;
-    const serviceName = String(port) === builtIn.ports[0].port ? builtIn.name : labelServiceName;
     const comment = `WireGuard ${label}`;
-    let services = configuration.services;
-    if (serviceName === labelServiceName)
-        services = [...services.filter(service => service.name !== labelServiceName),
-            { name: labelServiceName, ports: [{ protocol: "udp", port: String(port) }] }];
+    const isLabelService = (name: string) => name === labelServiceName || name.startsWith(`${labelServiceName}-`);
+    const isImportedRule = (rule: InputRule) => rule.comment === comment && (rule.service === builtIn.name || isLabelService(rule.service));
+    const ownedServiceName = configuration.inputRules.filter(isImportedRule).map(rule => rule.service)
+            .find(name => isLabelService(name) &&
+                configuration.forwardRules.every(rule => rule.service !== name) &&
+                configuration.inputRules.every(rule => rule.service !== name || isImportedRule(rule)));
+    const accepts = (service: ServiceDefinition) => service.ports.length === 1 && service.ports[0].protocol === "udp" && service.ports[0].port === String(port);
 
-    const isImportedRule = (rule: InputRule) => rule.comment === comment && (rule.service === builtIn.name || rule.service === labelServiceName);
+    let services = configuration.services;
+    const builtInOverride = services.find(service => service.name === builtIn.name);
+    let serviceName: string;
+    if (String(port) === builtIn.ports[0].port && (!builtInOverride || accepts(builtInOverride))) {
+        serviceName = builtIn.name;
+    } else if (ownedServiceName !== undefined) {
+        serviceName = ownedServiceName;
+        services = services.map(service => service.name === ownedServiceName ? { name: service.name, ports: [{ protocol: "udp", port: String(port) }] } : service);
+    } else {
+        const usable = (name: string) => {
+            const existing = allServices(configuration).find(service => service.name === name);
+            return existing === undefined || accepts(existing);
+        };
+        let suffix = 1;
+        serviceName = labelServiceName;
+        while (!usable(serviceName))
+            serviceName = `${labelServiceName}-${++suffix}`;
+        if (!services.some(service => service.name === serviceName))
+            services = [...services, { name: serviceName, ports: [{ protocol: "udp", port: String(port) }] }];
+    }
+
     let inputRules = configuration.inputRules;
     if (inputRules.some(isImportedRule))
         inputRules = inputRules.map(rule => isImportedRule(rule) ? { ...rule, service: serviceName } : rule);
     else if (!inputRules.some(rule => rule.service === serviceName))
         inputRules = [...inputRules, { from: {}, service: serviceName, action: "accept", enabled: true, comment }];
 
-    const referenced = [...configuration.forwardRules, ...inputRules].some(rule => rule.service === labelServiceName);
-    if (serviceName !== labelServiceName && !referenced)
-        services = services.filter(service => service.name !== labelServiceName);
+    if (ownedServiceName !== undefined && ownedServiceName !== serviceName)
+        services = services.filter(service => service.name !== ownedServiceName);
     return { ...configuration, services, inputRules };
 }
 

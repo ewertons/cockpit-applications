@@ -202,6 +202,21 @@ describe("migration and WireGuard helpers", () => {
         assert.deepEqual(backToDefault.inputRules.map(rule => [rule.service, rule.comment]), [["wireguard", "WireGuard wg0"]]);
     });
 
+    test("the WireGuard listen rule never changes a user service it does not own", () => {
+        const userService = { name: "wireguard-wg0", ports: [{ protocol: "tcp", port: "8443" }] };
+        const configuration: FirewallConfiguration = {
+            ...createEmptyConfiguration(),
+            services: [userService],
+            inputRules: [{ from: {}, service: "wireguard-wg0", action: "accept", enabled: true }],
+        };
+        const imported = addWireguardListenRule(configuration, 51821, "wg0");
+        assert.deepEqual(imported.services, [userService, { name: "wireguard-wg0-2", ports: [{ protocol: "udp", port: "51821" }] }]);
+        assert.deepEqual(imported.inputRules.map(rule => rule.service), ["wireguard-wg0", "wireguard-wg0-2"]);
+        const moved = addWireguardListenRule(imported, 51822, "wg0");
+        assert.deepEqual(moved.services, [userService, { name: "wireguard-wg0-2", ports: [{ protocol: "udp", port: "51822" }] }]);
+        assert.deepEqual(addWireguardListenRule(moved, 51820, "wg0").services, [userService]);
+    });
+
     test("peer names from an `(access: ...)` comment above [Peer]; `# Name =` wins", () => {
         const summary = parseWireguardConfiguration("wg0", "# vpn-laptop (access: ssh only)\n[Peer]\nPublicKey = a\nAllowedIPs = 10.99.0.3/32\n\n# phone (access: full)\n[Peer]\n# Name = my-phone\nPublicKey = b\nAllowedIPs = 10.99.0.4/32\n# not a header\n\n[Peer]\nPublicKey = c\nAllowedIPs = 10.99.0.5/32\n# tablet (access: lan)\n\n[Peer]\nPublicKey = d\nAllowedIPs = 10.99.0.6/32\n");
         assert.deepEqual(summary.hosts.map(host => host.name), ["vpn-laptop", "my-phone", "wg0-peer-c", "tablet"]);

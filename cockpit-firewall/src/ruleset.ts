@@ -89,15 +89,32 @@ function portSortKey(port: string): number {
     return Number(port.split("-")[0]);
 }
 
-interface ChainRule {
+export interface ChainRule {
     fragments: string[];
     verdict: string;
     comment?: string;
 }
 
-function renderRule(rule: ChainRule): string {
+export function renderRule(rule: ChainRule): string {
     return [...rule.fragments, rule.verdict, ...rule.comment ? [`comment ${quote(rule.comment)}`] : []].join(" ");
 }
+
+/** Accepts replies; first rule of the forward and input chains. */
+export const ESTABLISHED: ChainRule = { fragments: ["ct state established,related"], verdict: "accept", comment: BASELINE_COMMENT };
+
+/** Input rules every input chain starts with, after ESTABLISHED. */
+export const INPUT_BASELINE_RULES: readonly ChainRule[] = [
+    "iifname \"lo\"",
+    "icmp type echo-request",
+    "meta l4proto ipv6-icmp",
+    "udp sport 67 udp dport 68",
+    "ip6 saddr fe80::/10 udp sport 547 udp dport 546",
+].map(fragment => ({ fragments: [fragment], verdict: "accept", comment: BASELINE_COMMENT }));
+
+/** Keeps SSH and Cockpit reachable unless the user turns it off. */
+export const MANAGEMENT_RULE: ChainRule = {
+    fragments: [`tcp dport { ${MANAGEMENT_TCP_PORTS.join(", ")} }`], verdict: "accept", comment: MANAGEMENT_COMMENT,
+};
 
 class RulesetBuilder {
     readonly problems: string[] = [];
@@ -198,17 +215,7 @@ class RulesetBuilder {
     }
 
     inputBaselineRules(): ChainRule[] {
-        const baseline = (fragments: string[]): ChainRule => ({ fragments, verdict: "accept", comment: BASELINE_COMMENT });
-        const rules = [
-            baseline(["iifname \"lo\""]),
-            baseline(["icmp type echo-request"]),
-            baseline(["meta l4proto ipv6-icmp"]),
-            baseline(["udp sport 67 udp dport 68"]),
-            baseline(["ip6 saddr fe80::/10 udp sport 547 udp dport 546"]),
-        ];
-        if (this.configuration.allowManagementAccess)
-            rules.push({ fragments: [`tcp dport { ${MANAGEMENT_TCP_PORTS.join(", ")} }`], verdict: "accept", comment: MANAGEMENT_COMMENT });
-        return rules;
+        return [...INPUT_BASELINE_RULES, ...this.configuration.allowManagementAccess ? [MANAGEMENT_RULE] : []];
     }
 
     /** @returns the services that need a set: every user service and the built-ins rules use. */
@@ -249,8 +256,6 @@ function needsInputChain(configuration: FirewallConfiguration): boolean {
         configuration.inputRules.some(rule => rule.enabled) ||
         configuration.zones.some(zone => zone.inputPolicy === "drop");
 }
-
-const ESTABLISHED: ChainRule = { fragments: ["ct state established,related"], verdict: "accept", comment: BASELINE_COMMENT };
 
 /**
  * Generates the managed block of /etc/nftables.conf for the configuration.

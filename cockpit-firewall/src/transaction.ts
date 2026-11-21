@@ -40,7 +40,25 @@ export const ExitCode = {
     persistFailed: 8,
     otherChangePending: 9,
     fileChanged: 10,
+    stockTableChanged: 11,
 } as const;
+
+/**
+ * Shell lines refusing the apply unless the live `table inet filter` is absent or
+ * still the stock accept-all table: only base chains with policy accept, no rules or sets.
+ */
+function stockFilterTableCheckCommands(): string[] {
+    const table = `${STOCK_FILTER_TABLE.family} ${STOCK_FILTER_TABLE.name}`;
+    return [
+        `if stock_table=$(nft list table ${table} 2>/dev/null); then`,
+        `    extra=$(printf '%s\\n' "$stock_table" | grep -Evx '[[:space:]]*(table ${table} [{]|chain [A-Za-z0-9_.-]+ [{]|type filter hook [a-z]+ priority [a-z0-9-]+; policy accept;|[}])?[[:space:]]*' || true)`,
+        `    if [ -n "$extra" ]; then`,
+        `        echo "table ${table} has rules or a drop policy now; reload the page and apply again" >&2`,
+        `        exit ${ExitCode.stockTableChanged}`,
+        "    fi",
+        "fi",
+    ];
+}
 
 /** @returns the sysctl.d file enabling IPv4 forwarding. */
 export function sysctlFileText(): string {
@@ -155,6 +173,7 @@ export function applyScriptText(enableForwarding: boolean, removeStockFilterTabl
         `    echo "$configuration_file changed since it was reviewed; reload the page and apply again" >&2`,
         `    exit ${ExitCode.fileChanged}`,
         "fi",
+        ...removeStockFilterTable ? stockFilterTableCheckCommands() : [],
         `nft -c -f "$state_directory/pending.nft"`,
         `nft -c -f "$state_directory/pending.conf"`,
         `echo "$basis_digest" > "$state_directory/file-digest"`,
