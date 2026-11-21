@@ -107,10 +107,8 @@ else
     mkdir -p "$DEST"
     cp -r dist/* "$DEST/"
 
-    # Rules are applied from inside the app; nothing is loaded at install time.
-    echo "==> Ensuring /etc/cockpit-firewall and /etc/nftables.d exist..."
-    mkdir -p /etc/cockpit-firewall /etc/nftables.d
-    chmod 700 /etc/cockpit-firewall
+    # Rules are applied from inside the app and stored in /etc/nftables.conf;
+    # nothing is loaded or written at install time.
 fi
 
 echo "==> Done. Reload Cockpit in your browser to see 'Firewall rules' in the menu."

@@ -4,6 +4,7 @@
  */
 
 import {
+    ANY_SERVICE,
     Endpoint,
     FirewallConfiguration,
     PortSpecification,
@@ -22,6 +23,26 @@ export interface ParsedAddress {
     family: AddressFamily;
     /** Canonical text: bare address for /32 and /128, "address/prefix" otherwise. */
     text: string;
+}
+
+/** Prefix of comments on rules the app generates itself; user comments may not use it. */
+export const RESERVED_COMMENT_PREFIX = "cockpit-firewall:";
+
+/** Rule comments: printable ASCII without quotes or backslashes, so they fit nft's 128-byte limit with a position tag. */
+const COMMENT_PATTERN = /^[\x20-\x21\x23-\x5b\x5d-\x7e]{1,100}$/;
+
+/** WireGuard public key: 32 bytes, base64. */
+const PUBLIC_KEY_PATTERN = /^[A-Za-z0-9+/]{43}=$/;
+
+/** @returns whether `comment` may be stored as a rule comment. */
+export function isValidComment(comment: string): boolean {
+    return COMMENT_PATTERN.test(comment) && comment.trim() === comment &&
+        !comment.startsWith(RESERVED_COMMENT_PREFIX) && !comment.startsWith("@");
+}
+
+/** @returns whether `key` looks like a WireGuard public key. */
+export function isValidPublicKey(key: string): boolean {
+    return PUBLIC_KEY_PATTERN.test(key);
 }
 
 /** @returns whether `name` is a valid zone, host or service name. */
@@ -119,6 +140,48 @@ export function parseAddress(input: string): ParsedAddress | null {
     return null;
 }
 
+/** Inclusive numeric range covered by an address or network. */
+export interface AddressRange {
+    family: AddressFamily;
+    low: bigint;
+    high: bigint;
+}
+
+/** @returns the numeric range covered by a valid address or CIDR, or null when invalid. */
+export function addressRange(input: string): AddressRange | null {
+    const parsed = parseAddress(input);
+    if (!parsed)
+        return null;
+    const [addressPart, prefixPart] = parsed.text.split("/");
+    const bits = parsed.family === "ipv4" ? 32 : 128;
+    const units = parsed.family === "ipv4" ? parseIpv4Octets(addressPart)! : parseIpv6Groups(addressPart)!;
+    const unitBits = BigInt(parsed.family === "ipv4" ? 8 : 16);
+    const low = units.reduce((accumulated, unit) => (accumulated << unitBits) + BigInt(unit), 0n);
+    const prefixLength = prefixPart === undefined ? bits : Number(prefixPart);
+    const high = low + (1n << BigInt(bits - prefixLength)) - 1n;
+    return { family: parsed.family, low, high };
+}
+
+/** @returns pairs of addresses in the list that overlap (nft rejects overlapping intervals in one set). */
+export function overlappingAddresses(addresses: string[]): [string, string][] {
+    const ranges = addresses.map(address => ({ address, range: addressRange(address) }))
+            .filter(entry => entry.range !== null);
+    const overlaps: [string, string][] = [];
+    for (let first = 0; first < ranges.length; first++)
+        for (let second = first + 1; second < ranges.length; second++) {
+            const a = ranges[first].range!;
+            const b = ranges[second].range!;
+            if (a.family === b.family && a.low <= b.high && b.low <= a.high)
+                overlaps.push([ranges[first].address, ranges[second].address]);
+        }
+    return overlaps;
+}
+
+function portBounds(port: string): [number, number] {
+    const [low, high] = port.split("-").map(Number);
+    return [low, high ?? low];
+}
+
 /** @returns whether `port` is a single port 1-65535 or an ascending range "low-high". */
 export function isValidPort(port: string): boolean {
     const match = /^([1-9][0-9]{0,4})(?:-([1-9][0-9]{0,4}))?$/.exec(port);
@@ -158,6 +221,11 @@ function validateEndpoint(configuration: FirewallConfiguration, endpoint: Endpoi
 function validateServiceReference(configuration: FirewallConfiguration, service: string, label: string, errors: string[]): void {
     if (!allServices(configuration).some(definition => definition.name === service))
         errors.push(`${label}: unknown service "${service}"`);
+}
+
+function validateComment(comment: string | undefined, label: string, errors: string[]): void {
+    if (comment !== undefined && !isValidComment(comment))
+        errors.push(`${label}: invalid comment (up to 100 printable ASCII characters, no quotes or backslashes, not starting with "@" or "${RESERVED_COMMENT_PREFIX}")`);
 }
 
 function checkUniqueNames(names: string[], kind: string, errors: string[]): void {
@@ -200,20 +268,37 @@ export function validateConfiguration(configuration: FirewallConfiguration): str
             for (const address of host.addresses)
                 if (!parseAddress(address))
                     errors.push(`Host "${host.name}": invalid address "${address}"`);
+        if (Array.isArray(host.addresses)) {
+            const unique = [...new Set(host.addresses.map(address => parseAddress(address)?.text ?? address))];
+            for (const [first, second] of overlappingAddresses(unique))
+                errors.push(`Host "${host.name}": addresses ${first} and ${second} overlap`);
+        }
+        if (host.origin === "wireguard" &&
+            (!isValidInterfaceName(host.wireguardInterface ?? "") || !isValidPublicKey(host.wireguardPublicKey ?? "")))
+            errors.push(`Host "${host.name}": invalid WireGuard interface or public key`);
     }
     checkUniqueNames(configuration.hosts.map(host => host.name), "host", errors);
 
     for (const service of configuration.services) {
-        if (!isValidObjectName(service.name))
+        if (!isValidObjectName(service.name) || service.name === ANY_SERVICE)
             errors.push(`Invalid service name "${service.name}"`);
-        if (!Array.isArray(service.ports) || service.ports.length === 0)
+        if (!Array.isArray(service.ports) || service.ports.length === 0) {
             errors.push(`Service "${service.name}" has no ports`);
-        else
-            for (const port of service.ports)
-                if ((port.protocol !== "tcp" && port.protocol !== "udp") || !isValidPort(String(port.port)))
-                    errors.push(`Service "${service.name}": invalid port "${port.protocol}/${port.port}"`);
+            continue;
+        }
+        for (const port of service.ports)
+            if ((port.protocol !== "tcp" && port.protocol !== "udp") || !isValidPort(String(port.port)))
+                errors.push(`Service "${service.name}": invalid port "${port.protocol}/${port.port}"`);
+        const valid = service.ports.filter(port => isValidPort(String(port.port)));
+        for (let first = 0; first < valid.length; first++)
+            for (let second = first + 1; second < valid.length; second++) {
+                const [firstLow, firstHigh] = portBounds(String(valid[first].port));
+                const [secondLow, secondHigh] = portBounds(String(valid[second].port));
+                if (valid[first].protocol === valid[second].protocol && firstLow <= secondHigh && secondLow <= firstHigh)
+                    errors.push(`Service "${service.name}": ports ${valid[first].protocol}/${valid[first].port} and ${valid[second].protocol}/${valid[second].port} overlap`);
+            }
     }
-    checkUniqueNames(allServices(configuration).map(service => service.name), "service", errors);
+    checkUniqueNames(configuration.services.map(service => service.name), "service", errors);
 
     configuration.forwardRules.forEach((rule, index) => {
         const label = `Forward rule ${index + 1}`;
@@ -222,14 +307,18 @@ export function validateConfiguration(configuration: FirewallConfiguration): str
         validateServiceReference(configuration, rule.service, label, errors);
         if (!isVerdict(rule.action))
             errors.push(`${label}: action must be accept or drop`);
+        validateComment(rule.comment, label, errors);
     });
 
     configuration.inputRules.forEach((rule, index) => {
         const label = `Input rule ${index + 1}`;
         validateEndpoint(configuration, rule.from, label, errors);
+        if (rule.destinationHost !== undefined)
+            validateEndpoint(configuration, { host: rule.destinationHost }, `${label} (to)`, errors);
         validateServiceReference(configuration, rule.service, label, errors);
         if (!isVerdict(rule.action))
             errors.push(`${label}: action must be accept or drop`);
+        validateComment(rule.comment, label, errors);
     });
 
     configuration.natRules.forEach((rule, index) => {
@@ -244,11 +333,8 @@ export function validateConfiguration(configuration: FirewallConfiguration): str
             if (addresses.some(address => parseAddress(address)?.family !== "ipv4"))
                 errors.push(`${label}: source "${rule.sourceAddress}" must be an IPv4 address/CIDR or a host with only IPv4 addresses`);
         }
+        validateComment(rule.comment, label, errors);
     });
-
-    for (const port of configuration.wireguardListenPorts)
-        if (!Number.isInteger(port) || port < 1 || port > 65535)
-            errors.push(`Invalid WireGuard listen port "${port}"`);
 
     return errors;
 }

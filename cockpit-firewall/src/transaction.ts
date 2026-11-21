@@ -1,9 +1,12 @@
 /**
- * Shell scripts and unit files for safe apply with automatic rollback.
+ * Shell scripts for safe apply with automatic rollback.
  *
  * Scripts are generated only from constants and booleans: no user input is
- * ever interpolated. The ruleset itself reaches the apply script on stdin and
- * is checked with `nft -c` before anything is changed.
+ * ever interpolated. The live tables and the candidate /etc/nftables.conf
+ * reach the apply script on stdin and are checked with `nft -c` before
+ * anything is changed. Apply only loads this app's tables; the file is
+ * written on confirmation, never loaded with `nft -f` as a whole, because its
+ * `flush ruleset` would also drop tables of other tools.
  *
  * Rollback runs server-side from a transient systemd timer (or a detached
  * `sleep` when systemd-run is unavailable), so it fires even if the browser
@@ -12,14 +15,17 @@
  * token keeps a stale rollback from reverting a later change.
  */
 
-import { INET_TABLE_NAME, NAT_TABLE_NAME } from './model.js';
+import { INET_TABLE_NAME, LEGACY_NAT_TABLE_NAME } from './model.js';
+import { NFTABLES_CONFIGURATION_PATH, STOCK_FILTER_TABLE } from './nftables-file.js';
 
 export const STATE_DIRECTORY = "/run/cockpit-firewall";
-export const PERSISTED_RULESET_PATH = "/etc/nftables.d/cockpit-fw.nft";
-export const CONFIGURATION_PATH = "/etc/cockpit-firewall/config.json";
 export const SYSCTL_PATH = "/etc/sysctl.d/90-cockpit-firewall.conf";
-export const BOOT_UNIT_NAME = "cockpit-firewall.service";
-export const BOOT_UNIT_PATH = `/etc/systemd/system/${BOOT_UNIT_NAME}`;
+export const BACKUP_DIRECTORY = "/var/backups/cockpit-firewall";
+/** Files of earlier versions, moved to BACKUP_DIRECTORY on the first confirmation. */
+export const LEGACY_CONFIGURATION_PATH = "/etc/cockpit-firewall/config.json";
+export const LEGACY_RULESET_PATH = "/etc/nftables.d/cockpit-fw.nft";
+export const LEGACY_UNIT_NAME = "cockpit-firewall.service";
+export const LEGACY_UNIT_PATH = `/etc/systemd/system/${LEGACY_UNIT_NAME}`;
 export const ROLLBACK_UNIT_NAME = "cockpit-firewall-rollback";
 export const ROLLBACK_TIMEOUT_SECONDS = 60;
 const LOCK_PATH = `${STATE_DIRECTORY}/lock`;
@@ -33,47 +39,30 @@ export const ExitCode = {
     alreadyRolledBack: 7,
     persistFailed: 8,
     otherChangePending: 9,
+    fileChanged: 10,
 } as const;
-
-/** @returns the systemd unit that loads the persisted ruleset at boot and whenever nftables.service (re)starts. */
-export function bootUnitText(): string {
-    return [
-        "[Unit]",
-        `Description=Cockpit firewall rules (nftables tables inet ${INET_TABLE_NAME} and ip ${NAT_TABLE_NAME})`,
-        "Documentation=https://github.com/ewertons/cockpit-applications/tree/main/cockpit-firewall",
-        "DefaultDependencies=no",
-        "Wants=network-pre.target",
-        "Before=network-pre.target shutdown.target",
-        "After=nftables.service",
-        "PartOf=nftables.service",
-        "ReloadPropagatedFrom=nftables.service",
-        "Conflicts=shutdown.target",
-        `ConditionPathExists=${PERSISTED_RULESET_PATH}`,
-        "",
-        "[Service]",
-        "Type=oneshot",
-        "RemainAfterExit=yes",
-        `ExecStart=/usr/sbin/nft -f ${PERSISTED_RULESET_PATH}`,
-        `ExecReload=/usr/sbin/nft -f ${PERSISTED_RULESET_PATH}`,
-        "",
-        "[Install]",
-        "WantedBy=sysinit.target nftables.service",
-        "",
-    ].join("\n");
-}
 
 /** @returns the sysctl.d file enabling IPv4 forwarding. */
 export function sysctlFileText(): string {
     return "# Managed by cockpit-firewall: forward or NAT rules are configured.\nnet.ipv4.ip_forward = 1\n";
 }
 
-/** @returns shell lines that print a ruleset deleting, then restoring, the app's current tables. */
-function snapshotCommands(): string[] {
+/** Tables the apply may replace or delete, and therefore the rollback restores. */
+function touchedTables(removeStockFilterTable: boolean): string[] {
+    return [
+        `inet ${INET_TABLE_NAME}`,
+        `ip ${LEGACY_NAT_TABLE_NAME}`,
+        ...removeStockFilterTable ? [`${STOCK_FILTER_TABLE.family} ${STOCK_FILTER_TABLE.name}`] : [],
+    ];
+}
+
+/** @returns shell lines that print a ruleset deleting, then restoring, the tables the apply touches. */
+function snapshotCommands(removeStockFilterTable: boolean): string[] {
+    const tables = touchedTables(removeStockFilterTable);
     return [
         "{",
-        `    printf '%s\\n' 'table inet ${INET_TABLE_NAME}' 'delete table inet ${INET_TABLE_NAME}' 'table ip ${NAT_TABLE_NAME}' 'delete table ip ${NAT_TABLE_NAME}'`,
-        `    nft list table inet ${INET_TABLE_NAME} 2>/dev/null || true`,
-        `    nft list table ip ${NAT_TABLE_NAME} 2>/dev/null || true`,
+        `    printf '%s\\n' ${tables.map(table => `'table ${table}' 'delete table ${table}'`).join(" ")}`,
+        ...tables.map(table => `    nft list table ${table} 2>/dev/null || true`),
         `} > "$state_directory/rollback.nft"`,
     ];
 }
@@ -90,6 +79,7 @@ const LOCK_COMMANDS = [
  * @returns the rollback script. Its first argument is the token of the apply
  * that armed it; it does nothing when a newer apply replaced that token or a
  * decision was already taken, so stale timers or sleepers cannot revert a later change.
+ * /etc/nftables.conf needs no rollback: it is only written on confirmation.
  */
 export function rollbackScriptText(): string {
     return [
@@ -108,46 +98,52 @@ export function rollbackScriptText(): string {
     ].join("\n");
 }
 
-function parentDirectory(path: string): string {
-    return path.replace(/\/[^/]+$/, "");
-}
-
-function baseName(path: string): string {
-    return path.replace(/^.*\//, "");
-}
-
 /** Preamble shared by apply, confirm and revert: strict mode and the transaction lock. */
 const SCRIPT_PREAMBLE = [
     "set -eu",
     "umask 077",
     `state_directory="${STATE_DIRECTORY}"`,
     `rollback_unit="${ROLLBACK_UNIT_NAME}"`,
+    `configuration_file="${NFTABLES_CONFIGURATION_PATH}"`,
     `mkdir -p "$state_directory"`,
     ...LOCK_COMMANDS,
 ];
+
+/** Prints the sha256 of /etc/nftables.conf, or "absent". */
+const FILE_DIGEST_COMMAND = `{ sha256sum "$configuration_file" 2>/dev/null || echo absent; } | cut -d' ' -f1`;
 
 /** Runs rollback.sh for the current transaction while this script holds the lock. */
 const RUN_ROLLBACK_NOW = `${LOCK_HELD_VARIABLE}=1 /bin/sh "$state_directory/rollback.sh" "$(cat "$state_directory/token")"`;
 
 /**
- * Builds the apply script. It reads the new ruleset on stdin, checks it with
- * `nft -c`, snapshots the app's current tables, arms the rollback timer and
- * only then loads the new ruleset atomically with `nft -f`. The whole script
- * runs under the transaction lock, so concurrent applies are serialized.
+ * Builds the apply script. Its stdin is the text to load live, a line holding
+ * only the separator given as $1 (32 lowercase hex digits), then the candidate
+ * /etc/nftables.conf. It checks both with `nft -c`, records the file's digest,
+ * snapshots the tables it touches, arms the rollback timer and only then loads
+ * the live text atomically with `nft -f`. The whole script runs under the
+ * transaction lock, so concurrent applies are serialized.
  * @param enableForwarding set net.ipv4.ip_forward=1 at runtime (restored on rollback)
  *        and persist it on confirmation.
+ * @param removeStockFilterTable the live text deletes the stock `table inet filter`; snapshot it for rollback.
  */
-export function applyScriptText(enableForwarding: boolean): string {
+export function applyScriptText(enableForwarding: boolean, removeStockFilterTable: boolean): string {
     return [
         ...SCRIPT_PREAMBLE,
+        `case "\${1:-}" in`,
+        "    *[!0-9a-f]*|'') echo 'Invalid separator' >&2; exit 2 ;;",
+        "esac",
+        `[ "\${#1}" -eq 32 ] || { echo 'Invalid separator' >&2; exit 2; }`,
         `if [ -e "$state_directory/armed" ] && [ ! -d "$state_directory/decision" ]; then`,
         `    echo "A previous change is still waiting for confirmation" >&2`,
         `    exit ${ExitCode.pendingConfirmation}`,
         "fi",
         `rm -rf "$state_directory/decision" "$state_directory/outcome" "$state_directory/armed" "$state_directory/token"`,
-        `cat > "$state_directory/pending.nft"`,
+        `awk -v separator="$1" -v live="$state_directory/pending.nft" -v file="$state_directory/pending.conf" \\`,
+        `    'BEGIN { target = live; printf "" > live; printf "" > file } $0 == separator && target == live { target = file; next } { print > target }'`,
         `nft -c -f "$state_directory/pending.nft"`,
-        ...snapshotCommands(),
+        `nft -c -f "$state_directory/pending.conf"`,
+        `${FILE_DIGEST_COMMAND} > "$state_directory/file-digest"`,
+        ...snapshotCommands(removeStockFilterTable),
         `cat /proc/sys/net/ipv4/ip_forward > "$state_directory/previous-ip-forward"`,
         `echo ${enableForwarding ? 1 : 0} > "$state_directory/forwarding"`,
         `cat > "$state_directory/rollback.sh" <<'COCKPIT_FIREWALL_ROLLBACK'`,
@@ -179,18 +175,30 @@ const EXPECTED_TOKEN_CHECK = [
     "fi",
 ];
 
-/** Files written on confirmation; backed up first so a failed save can be undone. */
-const PERSISTED_PATHS = [PERSISTED_RULESET_PATH, SYSCTL_PATH, BOOT_UNIT_PATH];
+/** Moves files of earlier versions to a dated backup directory; failures are not fatal. */
+const LEGACY_CLEANUP = [
+    `if [ -e "${LEGACY_CONFIGURATION_PATH}" ] || [ -e "${LEGACY_RULESET_PATH}" ] || [ -e "${LEGACY_UNIT_PATH}" ]; then`,
+    `    legacy_backup="${BACKUP_DIRECTORY}/legacy-$(date +%Y%m%d-%H%M%S)"`,
+    `    mkdir -p "$legacy_backup" || true`,
+    `    systemctl disable "${LEGACY_UNIT_NAME}" >/dev/null 2>&1 || true`,
+    ...[LEGACY_CONFIGURATION_PATH, LEGACY_RULESET_PATH, LEGACY_UNIT_PATH]
+            .map(path => `    if [ -e "${path}" ]; then mv -f "${path}" "$legacy_backup/" || true; fi`),
+    `    rmdir "${LEGACY_CONFIGURATION_PATH.replace(/\/[^/]+$/, "")}" 2>/dev/null || true`,
+    "    systemctl daemon-reload || true",
+    "fi",
+];
 
 /**
- * Builds the confirm script ($1: token of the change the user reviewed). It persists the applied ruleset, the sysctl file
- * (as recorded by apply) and the boot unit, enables and starts the unit, and
- * only then cancels the rollback. If saving fails, the previous files are
- * restored and the change stays pending, so confirm can be retried or the
- * rollback still runs.
+ * Builds the confirm script ($1: token of the change the user reviewed). It
+ * refuses when /etc/nftables.conf changed since the apply, backs the file up
+ * to BACKUP_DIRECTORY/nftables.conf.previous, writes the candidate in place
+ * (following a symlink, keeping mode and owner), writes or removes the sysctl
+ * file, enables nftables.service and only then cancels the rollback. If saving
+ * fails, the previous files are restored and the change stays pending, so
+ * confirm can be retried or the rollback still runs. Files of earlier
+ * versions are then moved to a backup directory.
  */
 export function confirmScriptText(): string {
-    const backupDirectory = `"$state_directory/backup"`;
     return [
         ...SCRIPT_PREAMBLE,
         `if [ ! -e "$state_directory/armed" ]; then`,
@@ -202,36 +210,43 @@ export function confirmScriptText(): string {
         `    exit ${ExitCode.alreadyRolledBack}`,
         "fi",
         ...EXPECTED_TOKEN_CHECK,
-        `rm -rf ${backupDirectory}`,
-        `mkdir -p ${backupDirectory}`,
-        ...PERSISTED_PATHS.map(path => `if [ -e "${path}" ]; then cp -p "${path}" ${backupDirectory}/${baseName(path)}; fi`),
-        `unit_was_enabled=$(systemctl is-enabled "${BOOT_UNIT_NAME}" 2>/dev/null || true)`,
+        `if [ "$(${FILE_DIGEST_COMMAND})" != "$(cat "$state_directory/file-digest")" ]; then`,
+        `    echo "$configuration_file was changed by something else since Apply; revert, reload the page and apply again" >&2`,
+        `    exit ${ExitCode.fileChanged}`,
+        "fi",
+        `target=$(readlink -f "$configuration_file" || echo "$configuration_file")`,
+        `mkdir -p "${BACKUP_DIRECTORY}"`,
+        `chmod 700 "${BACKUP_DIRECTORY}"`,
+        `rm -f "${BACKUP_DIRECTORY}/nftables.conf.previous" "$state_directory/sysctl.previous"`,
+        `if [ -e "$target" ]; then cp -p "$target" "${BACKUP_DIRECTORY}/nftables.conf.previous"; fi`,
+        `if [ -e "${SYSCTL_PATH}" ]; then cp -p "${SYSCTL_PATH}" "$state_directory/sysctl.previous"; fi`,
+        `service_was_enabled=$(systemctl is-enabled nftables.service 2>/dev/null || true)`,
         "restore_previous_files() {",
-        ...PERSISTED_PATHS.map(path => `    if [ -e ${backupDirectory}/${baseName(path)} ]; then cp -p ${backupDirectory}/${baseName(path)} "${path}"; else rm -f "${path}"; fi`),
-        `    [ "$unit_was_enabled" = enabled ] || systemctl disable "${BOOT_UNIT_NAME}" >/dev/null 2>&1 || true`,
-        "    systemctl daemon-reload || true",
+        `    if [ -e "${BACKUP_DIRECTORY}/nftables.conf.previous" ]; then cp -p "${BACKUP_DIRECTORY}/nftables.conf.previous" "$target"; else rm -f "$target"; fi`,
+        `    if [ -e "$state_directory/sysctl.previous" ]; then cp -p "$state_directory/sysctl.previous" "${SYSCTL_PATH}"; else rm -f "${SYSCTL_PATH}"; fi`,
+        `    [ "$service_was_enabled" = enabled ] || systemctl disable nftables.service >/dev/null 2>&1 || true`,
         "}",
         "persist() {",
-        `    mkdir -p "${parentDirectory(PERSISTED_RULESET_PATH)}" "${parentDirectory(SYSCTL_PATH)}" "${parentDirectory(BOOT_UNIT_PATH)}" || return 1`,
-        `    install -m 600 "$state_directory/pending.nft" "${PERSISTED_RULESET_PATH}.new" || return 1`,
-        `    mv -f "${PERSISTED_RULESET_PATH}.new" "${PERSISTED_RULESET_PATH}" || return 1`,
+        `    if [ -e "$target" ]; then`,
+        `        cp -p "$target" "$target.new" || return 1`,
+        "    else",
+        `        install -m 755 /dev/null "$target.new" || return 1`,
+        "    fi",
+        `    cat "$state_directory/pending.conf" > "$target.new" || return 1`,
+        `    mv -f "$target.new" "$target" || return 1`,
         `    if [ "$(cat "$state_directory/forwarding" 2>/dev/null)" = 1 ]; then`,
+        `        mkdir -p "${SYSCTL_PATH.replace(/\/[^/]+$/, "")}" || return 1`,
         `        cat > "${SYSCTL_PATH}.new" <<'COCKPIT_FIREWALL_SYSCTL' || return 1`,
         sysctlFileText() + "COCKPIT_FIREWALL_SYSCTL",
         `        chmod 644 "${SYSCTL_PATH}.new" && mv -f "${SYSCTL_PATH}.new" "${SYSCTL_PATH}" || return 1`,
         "    else",
         `        rm -f "${SYSCTL_PATH}" || return 1`,
         "    fi",
-        `    cat > "${BOOT_UNIT_PATH}.new" <<'COCKPIT_FIREWALL_UNIT' || return 1`,
-        bootUnitText() + "COCKPIT_FIREWALL_UNIT",
-        `    chmod 644 "${BOOT_UNIT_PATH}.new" && mv -f "${BOOT_UNIT_PATH}.new" "${BOOT_UNIT_PATH}" || return 1`,
-        "    systemctl daemon-reload || return 1",
-        `    systemctl enable "${BOOT_UNIT_NAME}" >/dev/null || return 1`,
-        // Started now so ReloadPropagatedFrom=nftables.service works before the next boot.
-        `    systemctl start "${BOOT_UNIT_NAME}" || return 1`,
+        // Loads the file at boot. Not restarted now: the live tables already match.
+        "    systemctl enable nftables.service >/dev/null || return 1",
         "}",
         "if ! persist; then",
-        `    rm -f "${PERSISTED_RULESET_PATH}.new" "${SYSCTL_PATH}.new" "${BOOT_UNIT_PATH}.new"`,
+        `    rm -f "$target.new" "${SYSCTL_PATH}.new"`,
         "    restore_previous_files",
         `    echo "Saving the rules failed; previous files were restored. The change is still pending: retry, or it is rolled back automatically." >&2`,
         `    exit ${ExitCode.persistFailed}`,
@@ -240,6 +255,7 @@ export function confirmScriptText(): string {
         `systemctl stop "$rollback_unit.timer" 2>/dev/null || true`,
         `rm -f "$state_directory/armed"`,
         `echo confirmed > "$state_directory/outcome"`,
+        ...LEGACY_CLEANUP,
         "",
     ].join("\n");
 }

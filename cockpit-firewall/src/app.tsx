@@ -7,7 +7,8 @@ import { Spinner } from "@patternfly/react-core/dist/esm/components/Spinner/inde
 
 import cockpit from 'cockpit';
 
-import { loadConfiguration, saveConfiguration } from './firewall-backend.js';
+import { readHostFiles } from './firewall-backend.js';
+import { DerivedState, HostFiles, deriveState } from './firewall-state.js';
 import { FirewallConfiguration } from './model.js';
 import { ApplyPage } from './pages/apply-page.jsx';
 import { ObjectsPage } from './pages/objects-page.jsx';
@@ -32,8 +33,15 @@ export interface ConfigurationPageProps {
     onChange: (change: FirewallConfiguration | ((latest: FirewallConfiguration) => FirewallConfiguration)) => void;
 }
 
+/** Host files and what was derived from them. */
+export interface LoadedHostState {
+    files: HostFiles;
+    derived: DerivedState;
+}
+
 export const Application = () => {
     const [page, setPage] = useState<ApplicationPage>(pageFromLocation);
+    const [hostState, setHostState] = useState<LoadedHostState | null>(null);
     const [configuration, setConfiguration] = useState<FirewallConfiguration | null>(null);
     const [error, setError] = useState<string | null>(null);
     const latestConfiguration = useRef<FirewallConfiguration | null>(null);
@@ -44,17 +52,23 @@ export const Application = () => {
         return () => cockpit.removeEventListener("locationchanged", handler);
     }, []);
 
-    useEffect(() => {
-        loadConfiguration()
-                .then(loaded => {
-                    latestConfiguration.current = loaded;
-                    setConfiguration(loaded);
-                })
-                .catch(loadError => setError(cockpit.format(_("Cannot read the configuration: $0"), String(loadError?.message ?? loadError))));
+    /** Re-reads the host. With `resetDraft`, the editor restarts from the host's configuration. */
+    const reload = useCallback(async (resetDraft: boolean) => {
+        try {
+            const files = await readHostFiles();
+            const derived = deriveState(files);
+            setHostState({ files, derived });
+            if (resetDraft || !latestConfiguration.current) {
+                latestConfiguration.current = derived.initialConfiguration;
+                setConfiguration(derived.initialConfiguration);
+            }
+            setError(null);
+        } catch (loadError) {
+            setError(cockpit.format(_("Cannot read the firewall state: $0"), String((loadError as Error)?.message ?? loadError)));
+        }
     }, []);
 
-    // Saves run one after another so an older draft never overwrites a newer one.
-    const saveQueue = useRef<Promise<void>>(Promise.resolve());
+    useEffect(() => { reload(true) }, [reload]);
 
     const onChange = useCallback((change: FirewallConfiguration | ((latest: FirewallConfiguration) => FirewallConfiguration)) => {
         const latest = latestConfiguration.current;
@@ -63,10 +77,6 @@ export const Application = () => {
         const updated = typeof change === "function" ? change(latest!) : change;
         latestConfiguration.current = updated;
         setConfiguration(updated);
-        saveQueue.current = saveQueue.current
-                .then(() => saveConfiguration(updated))
-                .then(() => setError(null))
-                .catch(saveError => setError(cockpit.format(_("Cannot save the configuration: $0"), String(saveError?.message ?? saveError))));
     }, []);
 
     const navigation = (
@@ -81,16 +91,16 @@ export const Application = () => {
     );
 
     let content;
-    if (!configuration)
+    if (!configuration || !hostState)
         content = error ? null : <Spinner aria-label={_("Loading")} />;
     else if (page === "objects")
         content = <ObjectsPage configuration={configuration} onChange={onChange} />;
     else if (page === "rules")
         content = <RulesPage configuration={configuration} onChange={onChange} />;
     else if (page === "other-tables")
-        content = <OtherTablesPage />;
+        content = <OtherTablesPage fileText={hostState.files.fileText} />;
     else
-        content = <ApplyPage configuration={configuration} />;
+        content = <ApplyPage configuration={configuration} hostState={hostState} onReload={reload} />;
 
     return (
         <Page className="firewall-app">

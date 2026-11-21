@@ -7,10 +7,13 @@
 import cockpit from 'cockpit';
 
 import { ForeignTable, parseForeignTables } from './coexistence.js';
-import { FirewallConfiguration, INET_TABLE_NAME, NAT_TABLE_NAME, normalizeConfiguration } from './model.js';
+import { FirewallConfiguration, INET_TABLE_NAME, convertLegacyConfiguration } from './model.js';
+import { HostFiles } from './firewall-state.js';
+import { NFTABLES_CONFIGURATION_PATH } from './nftables-file.js';
 import {
-    CONFIGURATION_PATH,
-    PERSISTED_RULESET_PATH,
+    LEGACY_CONFIGURATION_PATH,
+    LEGACY_RULESET_PATH,
+    LEGACY_UNIT_PATH,
     SYSCTL_PATH,
     TransactionStatus,
     applyScriptText,
@@ -30,53 +33,83 @@ function errorMessage(error: unknown): string {
     return String(error);
 }
 
-/** @returns the saved configuration, or an empty one when none exists. */
-export async function loadConfiguration(): Promise<FirewallConfiguration> {
-    const text = await cockpit.file(CONFIGURATION_PATH, { superuser: "try" }).read();
-    if (!text)
-        return normalizeConfiguration(null);
-    return normalizeConfiguration(JSON.parse(text));
+/** Configuration files of earlier versions, which kept state outside nftables. */
+export interface LegacyState {
+    /** Contents of the old config.json, converted; null when absent or unreadable. */
+    configuration: FirewallConfiguration | null;
+    /** Whether any old file (config.json, cockpit-fw.nft, cockpit-firewall.service) exists. */
+    filesPresent: boolean;
 }
 
-/** Saves the configuration (the editable draft; not applied to the kernel). */
-export async function saveConfiguration(configuration: FirewallConfiguration): Promise<void> {
-    await cockpit.spawn(["mkdir", "-p", "-m", "700", CONFIGURATION_PATH.replace(/\/[^/]+$/, "")],
-                        { superuser: "require", err: "message" });
-    await cockpit.file(CONFIGURATION_PATH, { superuser: "require" }).replace(JSON.stringify(configuration, null, 2) + "\n");
+/** @returns /etc/nftables.conf, or null when it does not exist. */
+export async function readNftablesConfigurationFile(): Promise<string | null> {
+    return await cockpit.file(NFTABLES_CONFIGURATION_PATH, { superuser: "try" }).read();
 }
 
-/** @returns the ruleset file loaded at boot, or "" when none was persisted yet. */
-export async function readPersistedRuleset(): Promise<string> {
-    return (await cockpit.file(PERSISTED_RULESET_PATH, { superuser: "try" }).read()) ?? "";
+/** @returns `nft list` output of this app's table in the kernel, "" when not loaded. */
+export async function readLiveOwnTable(): Promise<string> {
+    try {
+        return await cockpit.spawn(["nft", "list", "table", "inet", INET_TABLE_NAME], { superuser: "require", err: "ignore" });
+    } catch {
+        return "";
+    }
 }
 
-/** @returns `nft list` output for this app's tables currently in the kernel. */
-export async function readLiveOwnTables(): Promise<string> {
-    const parts: string[] = [];
-    for (const [family, name] of [["inet", INET_TABLE_NAME], ["ip", NAT_TABLE_NAME]]) {
+/** @returns `nft list ruleset` output. */
+export async function readLiveRuleset(): Promise<string> {
+    return await cockpit.spawn(["nft", "list", "ruleset"], { superuser: "require", err: "message" });
+}
+
+/** @returns files left by earlier versions of this app. */
+export async function readLegacyState(): Promise<LegacyState> {
+    let configuration: FirewallConfiguration | null = null;
+    try {
+        const text = await cockpit.file(LEGACY_CONFIGURATION_PATH, { superuser: "try" }).read();
+        if (text)
+            configuration = convertLegacyConfiguration(JSON.parse(text));
+    } catch {
+        // Unreadable or invalid: ignored, the file is still moved away on confirmation.
+    }
+    let filesPresent = configuration !== null;
+    for (const path of [LEGACY_CONFIGURATION_PATH, LEGACY_RULESET_PATH, LEGACY_UNIT_PATH]) {
         try {
-            parts.push(await cockpit.spawn(["nft", "list", "table", family, name], { superuser: "require", err: "ignore" }));
+            await cockpit.spawn(["test", "-e", path], { superuser: "try", err: "ignore" });
+            filesPresent = true;
         } catch {
-            // Table not loaded.
+            // Absent.
         }
     }
-    return parts.join("");
+    return { configuration, filesPresent };
+}
+
+/** Random separator between the two parts of the apply script's stdin. */
+function randomSeparator(): string {
+    const bytes = new Uint8Array(16);
+    window.crypto.getRandomValues(bytes);
+    return Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
 /**
- * Checks and loads the ruleset with automatic rollback armed.
+ * Checks both texts with `nft -c`, loads `liveText` with automatic rollback
+ * armed and keeps `candidateFile` to be written to /etc/nftables.conf on confirmation.
+ * @param removeStockFilterTable `liveText` deletes the stock `table inet filter`.
  * @throws Error with nft's message when the check or load fails.
  */
-export async function applyRuleset(rulesetText: string, enableForwarding: boolean): Promise<void> {
+export async function applyRuleset(liveText: string, candidateFile: string, enableForwarding: boolean,
+    removeStockFilterTable: boolean): Promise<void> {
+    const separator = randomSeparator();
+    const withNewline = (text: string) => text.endsWith("\n") ? text : text + "\n";
     try {
-        await cockpit.script(applyScriptText(enableForwarding), [], { superuser: "require", err: "message" }).input(rulesetText);
+        await cockpit.script(applyScriptText(enableForwarding, removeStockFilterTable), [separator],
+                             { superuser: "require", err: "message" })
+                .input(withNewline(liveText) + separator + "\n" + candidateFile);
     } catch (error) {
         throw new Error(errorMessage(error));
     }
 }
 
 /**
- * Keeps the applied ruleset and persists it for boot.
+ * Keeps the applied rules and writes /etc/nftables.conf.
  * @param token token of the pending change the user reviewed (from the status).
  */
 export async function confirmRuleset(token: string): Promise<void> {
@@ -190,4 +223,15 @@ export async function importWireguardPeers(): Promise<WireguardScan> {
         }
     }
     return { summaries, failedInterfaces };
+}
+
+/** @returns everything deriveState needs. */
+export async function readHostFiles(): Promise<HostFiles> {
+    const [fileText, liveOwnTable, liveRuleset, legacy] = await Promise.all([
+        readNftablesConfigurationFile(),
+        readLiveOwnTable(),
+        readLiveRuleset().catch(() => ""),
+        readLegacyState(),
+    ]);
+    return { fileText, liveOwnTable, liveRuleset, legacyConfiguration: legacy.configuration, legacyFilesPresent: legacy.filesPresent };
 }

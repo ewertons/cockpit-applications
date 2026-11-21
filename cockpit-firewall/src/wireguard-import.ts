@@ -58,7 +58,9 @@ function publicKeyFallbackName(interfaceName: string, publicKey: string, usedNam
 
 /**
  * Parses one wg-quick configuration file into hosts (one per peer).
- * Peer names come from the `# Name = ...` comment; unnamed peers are named
+ * Peer names come from the `# Name = ...` comment inside the peer section or,
+ * failing that, a `# <name> (access: ...)` comment on the line just above
+ * `[Peer]`; unnamed peers are named
  * after their PublicKey (`<interface>-peer-<key prefix>`). Peers without a
  * PublicKey are skipped. Only valid AllowedIPs are kept.
  */
@@ -67,20 +69,25 @@ export function parseWireguardConfiguration(interfaceName: string, text: string)
     if (!isValidInterfaceName(interfaceName) || interfaceName.endsWith("*"))
         return summary;
 
-    interface PeerDraft { name?: string; publicKey?: string; allowedAddresses: string[] }
+    interface PeerDraft { name?: string; headerName?: string; publicKey?: string; allowedAddresses: string[] }
     const peers: PeerDraft[] = [];
     let section: "interface" | "peer" | null = null;
+    let previousLine = "";
 
     for (const rawLine of text.split(/\r?\n/)) {
         const line = rawLine.trim();
+        const lineAbove = previousLine;
+        previousLine = line;
         // Like wg-quick, drop inline comments: everything after '#'. "# Name =" is read from the full line.
         const content = line.replace(/#.*$/, "").trim();
         const sectionMatch = /^\[(\w+)\]$/.exec(content);
         if (sectionMatch) {
             const sectionName = sectionMatch[1].toLowerCase();
             section = sectionName === "interface" || sectionName === "peer" ? sectionName : null;
-            if (section === "peer")
-                peers.push({ allowedAddresses: [] });
+            if (section === "peer") {
+                const header = /^#\s*(\S+)\s+\(access:[^)]*\)$/i.exec(lineAbove);
+                peers.push({ allowedAddresses: [], ...header ? { headerName: header[1] } : {} });
+            }
             continue;
         }
         const currentPeer = section === "peer" ? peers[peers.length - 1] : undefined;
@@ -119,10 +126,11 @@ export function parseWireguardConfiguration(interfaceName: string, text: string)
     const usedNames = new Set<string>();
     for (const peer of peers) {
         if (!peer.publicKey) {
-            summary.skippedPeers.push(peer.name || "(no PublicKey)");
+            summary.skippedPeers.push(peer.name || peer.headerName || "(no PublicKey)");
             continue;
         }
-        let name = peer.name ? sanitizeHostName(peer.name) : "";
+        const label = peer.name || peer.headerName;
+        let name = label ? sanitizeHostName(label) : "";
         if (!name || usedNames.has(name))
             name = publicKeyFallbackName(interfaceName, peer.publicKey, usedNames);
         const addresses = [...new Set(peer.allowedAddresses
@@ -131,7 +139,7 @@ export function parseWireguardConfiguration(interfaceName: string, text: string)
         // A peer routing everything (any /0, however spelled) is a gateway, not a host to name in rules.
         const usable = addresses.filter(address => !address.endsWith("/0"));
         if (usable.length === 0) {
-            summary.skippedPeers.push(peer.name || name);
+            summary.skippedPeers.push(peer.name || peer.headerName || name);
             continue;
         }
         usedNames.add(name);

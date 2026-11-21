@@ -10,7 +10,7 @@ import cockpit from 'cockpit';
 import type { ConfigurationPageProps } from '../app.jsx';
 import { PageHeader, SelectField, SimpleTable, TextField, removeItem } from '../components.jsx';
 import { importWireguardPeers, listNetworkInterfaces } from '../firewall-backend.js';
-import { BUILT_IN_SERVICES, FirewallConfiguration, Verdict } from '../model.js';
+import { BUILT_IN_SERVICES, FirewallConfiguration, Verdict, addWireguardListenRule } from '../model.js';
 import { isValidInterfaceName, isValidObjectName, parseAddress, parseServicePorts } from '../validation.js';
 import { mergeImportedHosts } from '../wireguard-import.js';
 
@@ -139,7 +139,7 @@ const HostsCard = ({ configuration, onChange, setError }: ConfigurationPageProps
             return setError(cockpit.format(_("Host \"$0\" already exists."), name));
         const parsed = addressList.map(parseAddress);
         if (parsed.length === 0 || parsed.some(address => address === null))
-            return setError(_("Enter one or more IPv4/IPv6 addresses or networks (e.g. 192.168.1.20, 10.99.0.0/24). Networks must not have host bits set."));
+            return setError(_("Enter one or more IPv4/IPv6 addresses or networks (e.g. 192.168.1.30, 10.99.0.0/24). Networks must not have host bits set."));
         setError(null);
         onChange({ ...configuration, hosts: [...configuration.hosts, { name, addresses: parsed.map(address => address!.text), origin: "manual" }] });
         setName("");
@@ -160,17 +160,19 @@ const HostsCard = ({ configuration, onChange, setError }: ConfigurationPageProps
             const { summaries, failedInterfaces } = await importWireguardPeers();
             const messages: string[] = [];
             if (failedInterfaces.length)
-                messages.push(cockpit.format(_("Could not read: $0. Its peers and listen ports were left unchanged."), failedInterfaces.join(", ")));
+                messages.push(cockpit.format(_("Could not read: $0. Its peers were left unchanged."), failedInterfaces.join(", ")));
             // Merged into the latest draft: edits made while the scan ran are kept.
             onChange(latest => {
-                let hosts = latest.hosts;
-                // Rebuilt from this scan so stale ports are dropped; kept as they were if any file could not be read.
-                const listenPorts = new Set(failedInterfaces.length ? latest.wireguardListenPorts : []);
+                let updated = latest;
                 for (const summary of summaries) {
-                    const merged = mergeImportedHosts(hosts, summary);
-                    hosts = merged.hosts;
-                    if (summary.listenPort)
-                        listenPorts.add(summary.listenPort);
+                    const merged = mergeImportedHosts(updated.hosts, summary);
+                    updated = { ...updated, hosts: merged.hosts };
+                    if (summary.listenPort) {
+                        const withRule = addWireguardListenRule(updated, summary.listenPort, summary.interfaceName);
+                        if (withRule.inputRules.length > updated.inputRules.length)
+                            messages.push(cockpit.format(_("$0: added an input rule accepting its listen port udp/$1"), summary.interfaceName, summary.listenPort));
+                        updated = withRule;
+                    }
                     messages.push(cockpit.format(_("$0: $1 peer(s) imported"), summary.interfaceName, summary.hosts.length - merged.conflicts.length));
                     if (merged.conflicts.length)
                         messages.push(cockpit.format(_("$0: skipped, a manual host has the same name: $1"), summary.interfaceName, merged.conflicts.join(", ")));
@@ -181,7 +183,7 @@ const HostsCard = ({ configuration, onChange, setError }: ConfigurationPageProps
                     if (merged.reassigned.length)
                         messages.push(cockpit.format(_("$0: now a different peer (or not verifiable); check rules using: $1"), summary.interfaceName, merged.reassigned.join(", ")));
                 }
-                return { ...latest, hosts, wireguardListenPorts: [...listenPorts].sort((first, second) => first - second) };
+                return updated;
             });
             setImportMessage(summaries.length || failedInterfaces.length ? messages.join("\n") : _("No WireGuard configuration found in /etc/wireguard."));
         } catch (error) {
@@ -215,7 +217,7 @@ const HostsCard = ({ configuration, onChange, setError }: ConfigurationPageProps
                 />
                 <Form className="fw-add-form" onSubmit={event => { event.preventDefault(); add() }}>
                     <TextField fieldId="host-name" label={_("Name")} value={name} onChange={setName} placeholder="lan-server" />
-                    <TextField fieldId="host-addresses" label={_("Addresses")} value={addresses} onChange={setAddresses} placeholder="192.168.1.20" />
+                    <TextField fieldId="host-addresses" label={_("Addresses")} value={addresses} onChange={setAddresses} placeholder="192.168.1.30" />
                     <Button variant="secondary" type="submit">{_("Add host")}</Button>
                 </Form>
             </CardBody>
@@ -259,7 +261,7 @@ const ServicesCard = ({ configuration, onChange, setError }: ConfigurationPagePr
                     headers={[_("Name"), _("Ports"), ""]}
                     emptyText=""
                     rows={[
-                        ...BUILT_IN_SERVICES.map(service => [service.name, describePorts(service.ports), <span key="builtin" className="fw-muted">{_("Built-in")}</span>]),
+                        ...BUILT_IN_SERVICES.filter(service => !configuration.services.some(userService => userService.name === service.name)).map(service => [service.name, describePorts(service.ports), <span key="builtin" className="fw-muted">{_("Built-in")}</span>]),
                         ...configuration.services.map((service, index) => [
                             service.name,
                             describePorts(service.ports),
@@ -281,7 +283,7 @@ export const ObjectsPage = (props: ConfigurationPageProps) => {
     const [error, setError] = useState<string | null>(null);
     return (
         <>
-            <PageHeader title={_("Zones & objects")} description={_("Building blocks referenced by rules. Changes are saved as a draft; apply them from Status & apply.")} />
+            <PageHeader title={_("Zones & objects")} description={_("Building blocks referenced by rules. Changes stay in this browser tab until applied from Status & apply.")} />
             {error && <Alert variant="danger" isInline title={error} className="fw-alert" />}
             <ZonesCard {...props} setError={setError} />
             <HostsCard {...props} setError={setError} />
