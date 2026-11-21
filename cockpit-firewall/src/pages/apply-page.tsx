@@ -134,7 +134,8 @@ export const ApplyPage = ({ configuration, hostState, onReload }: ApplyPageProps
         const currentFile = await readNftablesConfigurationFile();
         if (currentFile !== files.fileText)
             throw new Error(cockpit.format(_("$0 changed since this page read it. Review the changes again, then apply."), NFTABLES_CONFIGURATION_PATH));
-        await applyRuleset(applyPlan.liveText, applyPlan.candidateFile, applyPlan.enableForwarding, applyPlan.removeStockFilterTable);
+        await applyRuleset(applyPlan.liveText, applyPlan.candidateFile, files.fileText, applyPlan.enableForwarding,
+                           applyPlan.removeStockFilterTable);
     }, null, false);
     const pendingToken = runtime?.transaction.state === "pending" ? runtime.transaction.token : "";
     const confirm = () => run(() => confirmRuleset(pendingToken),

@@ -10,7 +10,7 @@ import cockpit from 'cockpit';
 import type { ConfigurationPageProps } from '../app.jsx';
 import { PageHeader, SelectField, SimpleTable, TextField, removeItem } from '../components.jsx';
 import { importWireguardPeers, listNetworkInterfaces } from '../firewall-backend.js';
-import { BUILT_IN_SERVICES, FirewallConfiguration, Verdict, addWireguardListenRule } from '../model.js';
+import { BUILT_IN_SERVICES, Endpoint, FirewallConfiguration, Verdict, addWireguardListenRule } from '../model.js';
 import { isValidInterfaceName, isValidObjectName, parseAddress, parseServicePorts } from '../validation.js';
 import { mergeImportedHosts } from '../wireguard-import.js';
 
@@ -29,6 +29,7 @@ function referencesTo(configuration: FirewallConfiguration, kind: "zone" | "host
     const endpoints = [
         ...configuration.forwardRules.flatMap(rule => [rule.from, rule.to]),
         ...configuration.inputRules.map(rule => rule.from),
+        ...configuration.inputRules.flatMap(rule => rule.destinationHost ? [{ host: rule.destinationHost } as Endpoint] : []),
     ];
     if (kind === "zone")
         return endpoints.filter(endpoint => endpoint.zone === name).length +
@@ -171,6 +172,8 @@ const HostsCard = ({ configuration, onChange, setError }: ConfigurationPageProps
                         const withRule = addWireguardListenRule(updated, summary.listenPort, summary.interfaceName);
                         if (withRule.inputRules.length > updated.inputRules.length)
                             messages.push(cockpit.format(_("$0: added an input rule accepting its listen port udp/$1"), summary.interfaceName, summary.listenPort));
+                        else if (JSON.stringify(withRule) !== JSON.stringify(updated))
+                            messages.push(cockpit.format(_("$0: input rule updated to its listen port udp/$1"), summary.interfaceName, summary.listenPort));
                         updated = withRule;
                     }
                     messages.push(cockpit.format(_("$0: $1 peer(s) imported"), summary.interfaceName, summary.hosts.length - merged.conflicts.length));

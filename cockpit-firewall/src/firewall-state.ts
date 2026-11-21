@@ -38,15 +38,22 @@ export interface DerivedState {
     legacyNatTableLoaded: boolean;
 }
 
-/** @returns a comparable form of a parsed table: its regenerated text, or its configuration when invalid. */
+/**
+ * @returns a comparable form of a parsed table: its regenerated text (or its
+ * configuration when invalid) plus the statements the parser did not understand,
+ * with counter values removed, so unknown rules also count as differences.
+ */
 function canonical(parsed: ParsedRuleset | null): string {
     if (!parsed)
         return "";
+    let configurationText: string;
     try {
-        return generateRuleset(parsed.configuration).text;
+        configurationText = generateRuleset(parsed.configuration).text;
     } catch {
-        return JSON.stringify(parsed.configuration);
+        configurationText = JSON.stringify(parsed.configuration);
     }
+    const unrecognized = parsed.unrecognized.map(text => text.replace(/\bcounter packets \d+ bytes \d+/g, "counter"));
+    return [configurationText, ...unrecognized].join("\n");
 }
 
 /** @returns the UI state for the host files. */

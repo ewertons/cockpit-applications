@@ -137,6 +137,13 @@ describe("host state", () => {
         assert.equal(deriveState({ fileText: null, liveOwnTable: "", liveRuleset: "", legacyConfiguration: null, legacyFilesPresent: false }).source, "empty");
     });
 
+    test("an unknown rule in the live table is drift", () => {
+        const withExtraRule = liveTable.replace("\t\tiifname @zone_vpn counter drop", "\t\ttcp dport 22 counter packets 4 bytes 240 drop\n\t\tiifname @zone_vpn counter drop");
+        assert.equal(deriveState({ fileText: fileWithBlock, liveOwnTable: withExtraRule, liveRuleset: "", legacyConfiguration: null, legacyFilesPresent: false }).drift, true);
+        const counted = liveTable.replace("counter drop", "counter packets 9 bytes 540 drop");
+        assert.equal(deriveState({ fileText: fileWithBlock, liveOwnTable: counted, liveRuleset: "", legacyConfiguration: null, legacyFilesPresent: false }).drift, false);
+    });
+
     test("a legacy configuration wins until migrated, and the legacy NAT table is noticed", () => {
         const legacy = convertLegacyConfiguration({ zones: [], wireguardListenPorts: [51820] });
         const state = deriveState({ fileText: fileWithBlock, liveOwnTable: liveTable, liveRuleset: "table ip cockpit_fw_nat {\n}\n", legacyConfiguration: legacy, legacyFilesPresent: true });
@@ -156,12 +163,26 @@ describe("host state", () => {
 });
 
 describe("migration and WireGuard helpers", () => {
-    test("legacy configuration: listen ports become input rules, management access defaults on", () => {
-        const converted = convertLegacyConfiguration({ zones: [{ name: "vpn", interfaces: ["wg0"], forwardPolicy: "drop", inputPolicy: "accept" }], wireguardListenPorts: [51820, 51821, 0, "x"] });
+    test("legacy configuration: listen ports become the first input rules, management access defaults on", () => {
+        const converted = convertLegacyConfiguration({
+            zones: [{ name: "vpn", interfaces: ["wg0"], forwardPolicy: "drop", inputPolicy: "accept" }],
+            inputRules: [{ from: { zone: "vpn" }, service: "wireguard", action: "drop", enabled: false }],
+            wireguardListenPorts: [51820, 51821, 0, "x"],
+        });
         assert.equal(converted.allowManagementAccess, true);
-        assert.deepEqual(converted.inputRules.map(rule => [rule.service, rule.comment]), [["wireguard", "WireGuard 51820"], ["wireguard-51821", "WireGuard 51821"]]);
+        assert.deepEqual(converted.inputRules.map(rule => [rule.service, rule.action, rule.comment]),
+                         [["wireguard", "accept", "WireGuard 51820"], ["wireguard-51821", "accept", "WireGuard 51821"], ["wireguard", "drop", undefined]]);
         assert.deepEqual(converted.services, [{ name: "wireguard-51821", ports: [{ protocol: "udp", port: "51821" }] }]);
         assert.deepEqual(convertLegacyConfiguration("garbage"), createEmptyConfiguration());
+        assert.doesNotThrow(() => generateRuleset(converted));
+    });
+
+    test("legacy WireGuard hosts without a public key become manual hosts", () => {
+        const converted = convertLegacyConfiguration({
+            hosts: [{ name: "old-peer", addresses: ["10.99.0.7"], origin: "wireguard", wireguardInterface: "wg0" }],
+            forwardRules: [{ from: { host: "old-peer" }, to: {}, service: "any", action: "accept", enabled: true }],
+        });
+        assert.deepEqual(converted.hosts, [{ name: "old-peer", addresses: ["10.99.0.7"], origin: "manual" }]);
         assert.doesNotThrow(() => generateRuleset(converted));
     });
 
@@ -171,8 +192,18 @@ describe("migration and WireGuard helpers", () => {
         assert.equal(once.inputRules.length, 1);
     });
 
+    test("re-importing after a ListenPort change updates the imported rule and service", () => {
+        const first = addWireguardListenRule(createEmptyConfiguration(), 51821, "wg0");
+        const second = addWireguardListenRule(first, 51822, "wg0");
+        assert.deepEqual(second.services, [{ name: "wireguard-wg0", ports: [{ protocol: "udp", port: "51822" }] }]);
+        assert.deepEqual(second.inputRules.map(rule => rule.service), ["wireguard-wg0"]);
+        const backToDefault = addWireguardListenRule(second, 51820, "wg0");
+        assert.deepEqual(backToDefault.services, []);
+        assert.deepEqual(backToDefault.inputRules.map(rule => [rule.service, rule.comment]), [["wireguard", "WireGuard wg0"]]);
+    });
+
     test("peer names from an `(access: ...)` comment above [Peer]; `# Name =` wins", () => {
-        const summary = parseWireguardConfiguration("wg0", "# vpn-laptop (access: ssh only)\n[Peer]\nPublicKey = a\nAllowedIPs = 10.99.0.3/32\n\n# phone (access: full)\n[Peer]\n# Name = my-phone\nPublicKey = b\nAllowedIPs = 10.99.0.4/32\n# not a header\n\n[Peer]\nPublicKey = c\nAllowedIPs = 10.99.0.5/32\n");
-        assert.deepEqual(summary.hosts.map(host => host.name), ["vpn-laptop", "my-phone", "wg0-peer-c"]);
+        const summary = parseWireguardConfiguration("wg0", "# vpn-laptop (access: ssh only)\n[Peer]\nPublicKey = a\nAllowedIPs = 10.99.0.3/32\n\n# phone (access: full)\n[Peer]\n# Name = my-phone\nPublicKey = b\nAllowedIPs = 10.99.0.4/32\n# not a header\n\n[Peer]\nPublicKey = c\nAllowedIPs = 10.99.0.5/32\n# tablet (access: lan)\n\n[Peer]\nPublicKey = d\nAllowedIPs = 10.99.0.6/32\n");
+        assert.deepEqual(summary.hosts.map(host => host.name), ["vpn-laptop", "my-phone", "wg0-peer-c", "tablet"]);
     });
 });

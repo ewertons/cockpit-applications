@@ -230,6 +230,16 @@ describe("reading the table back", () => {
         assert.equal(parsed.configuration.zones[0].forwardPolicy, "accept");
     });
 
+    test("only an IPv4/IPv6 pair is merged; repeated rules stay separate", () => {
+        const configuration = scenarioConfiguration();
+        configuration.hosts.push({ name: "dual", addresses: ["192.168.1.10", "fd00::10"], origin: "manual" });
+        const dualRule = { from: { zone: "lan" }, to: { host: "dual" }, service: "dns", action: "accept" as const, enabled: true };
+        configuration.forwardRules = [{ ...configuration.forwardRules[0] }, { ...configuration.forwardRules[0] }, { ...dualRule }, { ...dualRule },
+            { ...configuration.forwardRules[0], enabled: false }];
+        const parsed = parseManagedTable(generateRuleset(configuration).text);
+        assert.deepEqual(parsed?.configuration.forwardRules, configuration.forwardRules);
+    });
+
     test("an unchanged built-in service set is not a user service", () => {
         assert.deepEqual(parseManagedTable(generateRuleset(scenarioConfiguration()).text)?.configuration.services, []);
     });

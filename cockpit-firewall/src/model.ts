@@ -135,33 +135,42 @@ export function requiresForwarding(configuration: FirewallConfiguration): boolea
 }
 
 /**
- * Adds an input rule accepting a WireGuard listen port from anywhere, unless
- * one for the same service exists. Port 51820 uses the built-in "wireguard"
- * service; other ports get a "wireguard-<label>" service.
+ * Makes the input rule accepting a WireGuard interface's listen port match `port`.
+ * Port 51820 uses the built-in "wireguard" service; other ports use a
+ * "wireguard-<label>" service, whose ports are set to `port`. The rule added by an
+ * earlier import (comment "WireGuard <label>") is switched to that service; otherwise
+ * a rule accepting it from anywhere is appended unless a rule already uses the service.
+ * A "wireguard-<label>" service left unused is removed.
  * @returns the updated configuration.
  */
 export function addWireguardListenRule(configuration: FirewallConfiguration, port: number, label: string): FirewallConfiguration {
     const builtIn = BUILT_IN_SERVICES.find(service => service.name === "wireguard")!;
-    let serviceName = builtIn.name;
+    const labelServiceName = `wireguard-${label}`;
+    const serviceName = String(port) === builtIn.ports[0].port ? builtIn.name : labelServiceName;
+    const comment = `WireGuard ${label}`;
     let services = configuration.services;
-    if (String(port) !== builtIn.ports[0].port) {
-        serviceName = `wireguard-${label}`;
-        if (!services.some(service => service.name === serviceName))
-            services = [...services, { name: serviceName, ports: [{ protocol: "udp", port: String(port) }] }];
-    }
-    if (configuration.inputRules.some(rule => rule.service === serviceName))
-        return { ...configuration, services };
-    return {
-        ...configuration,
-        services,
-        inputRules: [...configuration.inputRules, { from: {}, service: serviceName, action: "accept", enabled: true, comment: `WireGuard ${label}` }],
-    };
+    if (serviceName === labelServiceName)
+        services = [...services.filter(service => service.name !== labelServiceName),
+            { name: labelServiceName, ports: [{ protocol: "udp", port: String(port) }] }];
+
+    const isImportedRule = (rule: InputRule) => rule.comment === comment && (rule.service === builtIn.name || rule.service === labelServiceName);
+    let inputRules = configuration.inputRules;
+    if (inputRules.some(isImportedRule))
+        inputRules = inputRules.map(rule => isImportedRule(rule) ? { ...rule, service: serviceName } : rule);
+    else if (!inputRules.some(rule => rule.service === serviceName))
+        inputRules = [...inputRules, { from: {}, service: serviceName, action: "accept", enabled: true, comment }];
+
+    const referenced = [...configuration.forwardRules, ...inputRules].some(rule => rule.service === labelServiceName);
+    if (serviceName !== labelServiceName && !referenced)
+        services = services.filter(service => service.name !== labelServiceName);
+    return { ...configuration, services, inputRules };
 }
 
 /**
  * Converts the JSON configuration of earlier versions (/etc/cockpit-firewall/config.json)
  * into a configuration. Values are not validated here; see validateConfiguration.
- * Its WireGuard listen ports become input rules.
+ * Its WireGuard listen ports, accepted before any input rule there, become input
+ * rules placed first. Imported hosts without a stored public key become manual hosts.
  */
 export function convertLegacyConfiguration(value: unknown): FirewallConfiguration {
     const empty = createEmptyConfiguration();
@@ -169,20 +178,24 @@ export function convertLegacyConfiguration(value: unknown): FirewallConfiguratio
         return empty;
     const source = value as Partial<FirewallConfiguration> & { wireguardListenPorts?: unknown };
     const arrayOrEmpty = <T, >(candidate: T[] | undefined): T[] => Array.isArray(candidate) ? candidate : [];
-    let configuration: FirewallConfiguration = {
-        version: 1,
-        zones: arrayOrEmpty(source.zones),
-        hosts: arrayOrEmpty(source.hosts),
-        services: arrayOrEmpty(source.services),
-        forwardRules: arrayOrEmpty(source.forwardRules),
-        natRules: arrayOrEmpty(source.natRules),
-        inputRules: arrayOrEmpty(source.inputRules),
-        allowManagementAccess: source.allowManagementAccess !== false,
-    };
+    const hosts = arrayOrEmpty(source.hosts).map(host =>
+        host && typeof host === "object" && host.origin === "wireguard" && !host.wireguardPublicKey
+            ? { name: host.name, addresses: host.addresses, origin: "manual" as const }
+            : host);
+    let listenPortRules: FirewallConfiguration = { ...empty, services: arrayOrEmpty(source.services) };
     for (const port of arrayOrEmpty(source.wireguardListenPorts as number[] | undefined))
         if (Number.isInteger(port) && port >= 1 && port <= 65535)
-            configuration = addWireguardListenRule(configuration, port, String(port));
-    return configuration;
+            listenPortRules = addWireguardListenRule(listenPortRules, port, String(port));
+    return {
+        version: 1,
+        zones: arrayOrEmpty(source.zones),
+        hosts,
+        services: listenPortRules.services,
+        forwardRules: arrayOrEmpty(source.forwardRules),
+        natRules: arrayOrEmpty(source.natRules),
+        inputRules: [...listenPortRules.inputRules, ...arrayOrEmpty(source.inputRules)],
+        allowManagementAccess: source.allowManagementAccess !== false,
+    };
 }
 
 /** @returns a human readable description of an endpoint. */

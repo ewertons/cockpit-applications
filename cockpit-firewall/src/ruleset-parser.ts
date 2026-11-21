@@ -284,7 +284,8 @@ class TableReader {
             const kind = baseName as "forward" | "input" | "postrouting";
             if (kind === "input" && !isDisabled)
                 inputChainSeen = true;
-            let previousKey: string | null = null;
+            // Key of the previous rule when it was the IPv4 half of a possible IPv4/IPv6 pair.
+            let pendingIpv4Key: string | null = null;
             for (const { statement, tokens } of content.rules) {
                 const comment = ruleComment(tokens);
                 if (!isDisabled && comment === BASELINE_COMMENT)
@@ -297,16 +298,21 @@ class TableReader {
                 const converted = match && this.convertRule(kind, match, isDisabled);
                 if (!converted) {
                     this.unrecognized.push(this.describe(`chain ${chainName}`, statement));
-                    previousKey = null;
+                    pendingIpv4Key = null;
                     continue;
                 }
-                if (converted === "policy")
+                if (converted === "policy") {
+                    pendingIpv4Key = null;
                     continue;
-                // One configured rule becomes one nftables rule per address family; merge them back.
+                }
+                // A rule on dual-stack hosts becomes an IPv4 rule followed by an IPv6 rule; merge only that pair.
                 const key = JSON.stringify(converted);
-                if (key === previousKey)
+                const family = match.source?.family ?? match.destination?.family;
+                if (family === "ipv6" && key === pendingIpv4Key) {
+                    pendingIpv4Key = null;
                     continue;
-                previousKey = key;
+                }
+                pendingIpv4Key = family === "ipv4" ? key : null;
                 if (isDisabled)
                     (disabled[kind] as [number, unknown][]).push([converted.position, converted.rule]);
                 else

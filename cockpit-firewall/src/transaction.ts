@@ -109,16 +109,22 @@ const SCRIPT_PREAMBLE = [
     ...LOCK_COMMANDS,
 ];
 
-/** Prints the sha256 of /etc/nftables.conf, or "absent". */
-const FILE_DIGEST_COMMAND = `{ sha256sum "$configuration_file" 2>/dev/null || echo absent; } | cut -d' ' -f1`;
+/**
+ * Prints the sha256 of /etc/nftables.conf as if it ended with a newline (the
+ * form in which the reviewed copy reaches the apply script), or "absent".
+ */
+const FILE_DIGEST_COMMAND = `if [ -e "$configuration_file" ]; then { cat "$configuration_file"; [ -z "$(tail -c1 "$configuration_file")" ] || echo; } | sha256sum | cut -d' ' -f1; else echo absent; fi`;
 
 /** Runs rollback.sh for the current transaction while this script holds the lock. */
 const RUN_ROLLBACK_NOW = `${LOCK_HELD_VARIABLE}=1 /bin/sh "$state_directory/rollback.sh" "$(cat "$state_directory/token")"`;
 
 /**
  * Builds the apply script. Its stdin is the text to load live, a line holding
- * only the separator given as $1 (32 lowercase hex digits), then the candidate
- * /etc/nftables.conf. It checks both with `nft -c`, records the file's digest,
+ * only the separator given as $1 (32 lowercase hex digits), the candidate
+ * /etc/nftables.conf, the separator again, then the file the user reviewed
+ * ($2: "present", or "absent" when there was none). It refuses if the file no
+ * longer matches the reviewed one, checks both texts with `nft -c`, records the
+ * reviewed file's digest for confirmation,
  * snapshots the tables it touches, arms the rollback timer and only then loads
  * the live text atomically with `nft -f`. The whole script runs under the
  * transaction lock, so concurrent applies are serialized.
@@ -138,11 +144,20 @@ export function applyScriptText(enableForwarding: boolean, removeStockFilterTabl
         `    exit ${ExitCode.pendingConfirmation}`,
         "fi",
         `rm -rf "$state_directory/decision" "$state_directory/outcome" "$state_directory/armed" "$state_directory/token"`,
-        `awk -v separator="$1" -v live="$state_directory/pending.nft" -v file="$state_directory/pending.conf" \\`,
-        `    'BEGIN { target = live; printf "" > live; printf "" > file } $0 == separator && target == live { target = file; next } { print > target }'`,
+        `case "\${2:-}" in present|absent) ;; *) echo 'Invalid file state' >&2; exit 2 ;; esac`,
+        `awk -v separator="$1" -v live="$state_directory/pending.nft" -v file="$state_directory/pending.conf" -v basis="$state_directory/basis.conf" \\`,
+        `    'BEGIN { target = live; printf "" > live; printf "" > file; printf "" > basis }`,
+        `     $0 == separator && target == live { target = file; next }`,
+        `     $0 == separator && target == file { target = basis; next }`,
+        `     { print > target }'`,
+        `if [ "$2" = absent ]; then basis_digest=absent; else basis_digest=$(sha256sum < "$state_directory/basis.conf" | cut -d' ' -f1); fi`,
+        `if [ "$(${FILE_DIGEST_COMMAND})" != "$basis_digest" ]; then`,
+        `    echo "$configuration_file changed since it was reviewed; reload the page and apply again" >&2`,
+        `    exit ${ExitCode.fileChanged}`,
+        "fi",
         `nft -c -f "$state_directory/pending.nft"`,
         `nft -c -f "$state_directory/pending.conf"`,
-        `${FILE_DIGEST_COMMAND} > "$state_directory/file-digest"`,
+        `echo "$basis_digest" > "$state_directory/file-digest"`,
         ...snapshotCommands(removeStockFilterTable),
         `cat /proc/sys/net/ipv4/ip_forward > "$state_directory/previous-ip-forward"`,
         `echo ${enableForwarding ? 1 : 0} > "$state_directory/forwarding"`,

@@ -59,8 +59,8 @@ function publicKeyFallbackName(interfaceName: string, publicKey: string, usedNam
 /**
  * Parses one wg-quick configuration file into hosts (one per peer).
  * Peer names come from the `# Name = ...` comment inside the peer section or,
- * failing that, a `# <name> (access: ...)` comment on the line just above
- * `[Peer]`; unnamed peers are named
+ * failing that, a `# <name> (access: ...)` comment on the last non-blank line
+ * above `[Peer]`; unnamed peers are named
  * after their PublicKey (`<interface>-peer-<key prefix>`). Peers without a
  * PublicKey are skipped. Only valid AllowedIPs are kept.
  */
@@ -77,7 +77,9 @@ export function parseWireguardConfiguration(interfaceName: string, text: string)
     for (const rawLine of text.split(/\r?\n/)) {
         const line = rawLine.trim();
         const lineAbove = previousLine;
-        previousLine = line;
+        // Blank lines are skipped: writers such as cockpit-wireguard put one before [Peer].
+        if (line !== "")
+            previousLine = line;
         // Like wg-quick, drop inline comments: everything after '#'. "# Name =" is read from the full line.
         const content = line.replace(/#.*$/, "").trim();
         const sectionMatch = /^\[(\w+)\]$/.exec(content);

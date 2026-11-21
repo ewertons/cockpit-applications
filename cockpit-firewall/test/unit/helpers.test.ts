@@ -152,10 +152,13 @@ describe("transaction scripts", () => {
     test("apply checks both texts before snapshotting, arms rollback before loading, forwards only after loading", () => {
         const order = [
             "*[!0-9a-f]*|'') echo 'Invalid separator'",
+            "present|absent) ;;",
             "awk -v separator=\"$1\"",
+            'sha256sum < "$state_directory/basis.conf"',
+            "exit 10",
             'nft -c -f "$state_directory/pending.nft"',
             'nft -c -f "$state_directory/pending.conf"',
-            'sha256sum "$configuration_file"',
+            'echo "$basis_digest" > "$state_directory/file-digest"',
             "nft list table inet cockpit_fw",
             "systemd-run --quiet",
             'if ! nft -f "$state_directory/pending.nft"',

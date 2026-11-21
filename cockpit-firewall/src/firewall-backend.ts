@@ -92,17 +92,20 @@ function randomSeparator(): string {
 /**
  * Checks both texts with `nft -c`, loads `liveText` with automatic rollback
  * armed and keeps `candidateFile` to be written to /etc/nftables.conf on confirmation.
+ * @param reviewedFile /etc/nftables.conf as the user reviewed it (null: absent); the
+ *        apply fails if the file differs now.
  * @param removeStockFilterTable `liveText` deletes the stock `table inet filter`.
  * @throws Error with nft's message when the check or load fails.
  */
-export async function applyRuleset(liveText: string, candidateFile: string, enableForwarding: boolean,
-    removeStockFilterTable: boolean): Promise<void> {
+export async function applyRuleset(liveText: string, candidateFile: string, reviewedFile: string | null,
+    enableForwarding: boolean, removeStockFilterTable: boolean): Promise<void> {
     const separator = randomSeparator();
-    const withNewline = (text: string) => text.endsWith("\n") ? text : text + "\n";
+    const withNewline = (text: string) => text === "" || text.endsWith("\n") ? text : text + "\n";
     try {
-        await cockpit.script(applyScriptText(enableForwarding, removeStockFilterTable), [separator],
+        await cockpit.script(applyScriptText(enableForwarding, removeStockFilterTable),
+                             [separator, reviewedFile === null ? "absent" : "present"],
                              { superuser: "require", err: "message" })
-                .input(withNewline(liveText) + separator + "\n" + candidateFile);
+                .input(withNewline(liveText) + separator + "\n" + withNewline(candidateFile) + separator + "\n" + (reviewedFile ?? ""));
     } catch (error) {
         throw new Error(errorMessage(error));
     }
