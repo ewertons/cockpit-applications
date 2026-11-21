@@ -2,14 +2,16 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert } from "@patternfly/react-core/dist/esm/components/Alert/index.js";
 import { Button } from "@patternfly/react-core/dist/esm/components/Button/index.js";
 import { Card, CardBody, CardTitle } from "@patternfly/react-core/dist/esm/components/Card/index.js";
+import { Checkbox } from "@patternfly/react-core/dist/esm/components/Checkbox/index.js";
 import { ExpandableSection } from "@patternfly/react-core/dist/esm/components/ExpandableSection/index.js";
 import { Label } from "@patternfly/react-core/dist/esm/components/Label/index.js";
 import { Modal, ModalBody, ModalFooter, ModalHeader } from "@patternfly/react-core/dist/esm/components/Modal/index.js";
 
 import cockpit from 'cockpit';
 
+import { ConfigurationPageProps, LoadedHostState } from '../app.jsx';
 import { PageHeader } from '../components.jsx';
-import { foreignTableWarnings } from '../coexistence.js';
+import { ForeignTable, foreignTableWarnings } from '../coexistence.js';
 import {
     ForwardingState,
     applyRuleset,
@@ -17,34 +19,34 @@ import {
     detectOtherFirewallManagers,
     listForeignTables,
     readForwardingState,
-    readLiveOwnTables,
-    readPersistedRuleset,
+    readNftablesConfigurationFile,
     readTransactionStatus,
     revertRuleset,
 } from '../firewall-backend.js';
-import { FirewallConfiguration, INET_TABLE_NAME, NAT_TABLE_NAME, requiresForwarding } from '../model.js';
-import { ConfigurationError, GeneratedRuleset, generateRuleset } from '../ruleset.js';
+import { ApplyPlan, isUpToDate, planApply } from '../firewall-state.js';
+import { FirewallConfiguration, requiresForwarding } from '../model.js';
+import { NFTABLES_CONFIGURATION_PATH, hasFlushRuleset, tablesDefinedInFile } from '../nftables-file.js';
+import { ConfigurationError } from '../ruleset.js';
 import { diffLines } from '../text-diff.js';
-import { PERSISTED_RULESET_PATH, SYSCTL_PATH, TransactionStatus } from '../transaction.js';
+import { BACKUP_DIRECTORY, SYSCTL_PATH, TransactionStatus } from '../transaction.js';
 
 const _ = cockpit.gettext;
 
-interface HostState {
-    persistedRuleset: string;
-    liveTables: string;
+interface RuntimeState {
     forwarding: ForwardingState | null;
     otherManagers: string[];
-    foreignWarnings: string[];
+    foreignTables: ForeignTable[];
     transaction: TransactionStatus;
 }
 
-function generate(configuration: FirewallConfiguration): { ruleset: GeneratedRuleset | null; problems: string[] } {
+function plan(fileText: string | null, configuration: FirewallConfiguration, removeStockFilterTable: boolean):
+    { applyPlan: ApplyPlan | null; problems: string[] } {
     try {
-        return { ruleset: generateRuleset(configuration), problems: [] };
+        return { applyPlan: planApply(fileText, configuration, removeStockFilterTable), problems: [] };
     } catch (error) {
         if (error instanceof ConfigurationError)
-            return { ruleset: null, problems: error.problems };
-        return { ruleset: null, problems: [String(error)] };
+            return { applyPlan: null, problems: error.problems };
+        return { applyPlan: null, problems: [String((error as Error)?.message ?? error)] };
     }
 }
 
@@ -58,40 +60,44 @@ const DiffView = ({ before, after }: { before: string; after: string }) => (
     </pre>
 );
 
-/** @returns whether every table of this app that the ruleset defines is currently loaded. */
-function ownTablesLoaded(rulesetText: string, liveTables: string): boolean {
-    return [`table inet ${INET_TABLE_NAME}`, `table ip ${NAT_TABLE_NAME}`]
-            .every(table => !rulesetText.includes(`${table} {`) || liveTables.includes(`${table} {`));
+interface ApplyPageProps {
+    configuration: ConfigurationPageProps["configuration"];
+    hostState: LoadedHostState;
+    /** Re-reads the host; `resetDraft` discards the edited configuration. */
+    onReload: (resetDraft: boolean) => Promise<void>;
 }
 
-export const ApplyPage = ({ configuration }: { configuration: FirewallConfiguration }) => {
-    const [hostState, setHostState] = useState<HostState | null>(null);
+export const ApplyPage = ({ configuration, hostState, onReload }: ApplyPageProps) => {
+    const [runtime, setRuntime] = useState<RuntimeState | null>(null);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [notice, setNotice] = useState<string | null>(null);
     const [secondsLeft, setSecondsLeft] = useState(0);
+    const [removeStockFilterTable, setRemoveStockFilterTable] = useState(false);
 
-    const { ruleset, problems } = useMemo(() => generate(configuration), [configuration]);
+    const { files, derived } = hostState;
+    const removeStock = removeStockFilterTable && derived.stockFilterTableRemovable;
+    const { applyPlan, problems } = useMemo(() => plan(files.fileText, configuration, removeStock),
+                                            [files.fileText, configuration, removeStock]);
     const forwardingNeeded = requiresForwarding(configuration);
+    const draftChanged = useMemo(() => JSON.stringify(configuration) !== JSON.stringify(derived.initialConfiguration),
+                                 [configuration, derived.initialConfiguration]);
 
     const refresh = useCallback(async () => {
-        const [persistedRuleset, liveTables, forwarding, otherManagers, transaction] = await Promise.all([
-            readPersistedRuleset().catch(() => ""),
-            readLiveOwnTables().catch(() => ""),
+        const [forwarding, otherManagers, transaction, foreignTables] = await Promise.all([
             readForwardingState().catch(() => null),
             detectOtherFirewallManagers(),
             readTransactionStatus(),
+            listForeignTables().catch(() => []),
         ]);
-        const foreignWarnings = await listForeignTables().then(foreignTableWarnings)
-                .catch(() => []);
-        setHostState({ persistedRuleset, liveTables, forwarding, otherManagers, foreignWarnings, transaction });
+        setRuntime({ forwarding, otherManagers, foreignTables, transaction });
         if (transaction.state === "pending")
             setSecondsLeft(transaction.secondsLeft);
     }, []);
 
     useEffect(() => { refresh() }, [refresh]);
 
-    const pending = hostState?.transaction.state === "pending";
+    const pending = runtime?.transaction.state === "pending";
 
     useEffect(() => {
         if (!pending)
@@ -99,16 +105,16 @@ export const ApplyPage = ({ configuration }: { configuration: FirewallConfigurat
         const timer = window.setInterval(() => {
             setSecondsLeft(previous => {
                 if (previous <= 1) {
-                    refresh();
+                    refresh().then(() => onReload(false));
                     return 0;
                 }
                 return previous - 1;
             });
         }, 1000);
         return () => window.clearInterval(timer);
-    }, [pending, refresh]);
+    }, [pending, refresh, onReload]);
 
-    const run = async (action: () => Promise<void>, successNotice: string | null) => {
+    const run = async (action: () => Promise<void>, successNotice: string | null, resetDraft: boolean) => {
         setBusy(true);
         setError(null);
         setNotice(null);
@@ -120,28 +126,46 @@ export const ApplyPage = ({ configuration }: { configuration: FirewallConfigurat
             setError(String((actionError as Error)?.message ?? actionError));
         }
         await refresh();
+        await onReload(resetDraft);
         setBusy(false);
     };
 
-    const apply = () => ruleset && run(() => applyRuleset(ruleset.text, forwardingNeeded), null);
-    const pendingToken = hostState?.transaction.state === "pending" ? hostState.transaction.token : "";
+    const apply = () => applyPlan && run(async () => {
+        const currentFile = await readNftablesConfigurationFile();
+        if (currentFile !== files.fileText)
+            throw new Error(cockpit.format(_("$0 changed since this page read it. Review the changes again, then apply."), NFTABLES_CONFIGURATION_PATH));
+        await applyRuleset(applyPlan.liveText, applyPlan.candidateFile, files.fileText, applyPlan.enableForwarding,
+                           applyPlan.removeStockFilterTable);
+    }, null, false);
+    const pendingToken = runtime?.transaction.state === "pending" ? runtime.transaction.token : "";
     const confirm = () => run(() => confirmRuleset(pendingToken),
-                              cockpit.format(_("Changes kept and saved to $0. They are loaded at boot."), PERSISTED_RULESET_PATH));
-    const revert = () => run(() => revertRuleset(pendingToken), _("Reverted to the previous rules."));
+                              cockpit.format(_("Changes kept and written to $0, which nftables.service loads at boot. The previous file is in $1."),
+                                             NFTABLES_CONFIGURATION_PATH, BACKUP_DIRECTORY),
+                              true);
+    const revert = () => run(() => revertRuleset(pendingToken), _("Reverted to the previous rules."), false);
 
-    const unchanged = ruleset !== null && hostState !== null && hostState.persistedRuleset === ruleset.text &&
-        ownTablesLoaded(ruleset.text, hostState.liveTables);
-    const transactionState = hostState?.transaction.state;
+    const upToDate = applyPlan !== null && isUpToDate(files, derived, applyPlan);
+    const transactionState = runtime?.transaction.state;
+    const fileTables = new Set(tablesDefinedInFile(files.fileText ?? ""));
+    const flushedTables = files.fileText && hasFlushRuleset(files.fileText)
+        ? (runtime?.foreignTables ?? []).map(table => `${table.family} ${table.name}`).filter(table => !fileTables.has(table))
+        : [];
+    const foreignWarnings = foreignTableWarnings(runtime?.foreignTables ?? []);
 
     return (
         <>
             <PageHeader
                 title={_("Firewall rules")}
-                description={_("nftables tables inet cockpit_fw and ip cockpit_fw_nat. Other tables are never modified.")}
+                description={cockpit.format(_("Stored in $0 as nftables table inet cockpit_fw. Everything else in that file and other tables are left unchanged."), NFTABLES_CONFIGURATION_PATH)}
                 actions={
-                    <Button variant="primary" onClick={apply} isDisabled={busy || !ruleset || pending || unchanged} isLoading={busy && !pending}>
-                        {_("Apply")}
-                    </Button>
+                    <>
+                        <Button variant="secondary" onClick={() => run(async () => undefined, null, true)} isDisabled={busy || pending || !draftChanged}>
+                            {_("Discard changes")}
+                        </Button>{" "}
+                        <Button variant="primary" onClick={apply} isDisabled={busy || !applyPlan || pending || upToDate} isLoading={busy && !pending}>
+                            {_("Apply")}
+                        </Button>
+                    </>
                 }
             />
 
@@ -153,41 +177,84 @@ export const ApplyPage = ({ configuration }: { configuration: FirewallConfigurat
             {transactionState === "rollback-failed" && (
                 <Alert variant="danger" isInline className="fw-alert" title={_("Rolling back the last change failed. Check the loaded rules below.")} />
             )}
+            {draftChanged && (
+                <Alert variant="info" isInline className="fw-alert" title={_("Unapplied changes")}>
+                    {_("Edits are kept only in this browser tab until applied. Reloading the page discards them.")}
+                </Alert>
+            )}
+            {derived.source === "legacy" && (
+                <Alert variant="info" isInline className="fw-alert" title={_("Configuration of an earlier version found")}>
+                    {cockpit.format(_("It was loaded from $0. Apply and keep the changes to move it into $1; the old files and cockpit-firewall.service are then moved to $2."),
+                                    "/etc/cockpit-firewall/config.json", NFTABLES_CONFIGURATION_PATH, BACKUP_DIRECTORY)}
+                </Alert>
+            )}
+            {derived.source !== "legacy" && files.legacyFilesPresent && (
+                <Alert variant="info" isInline className="fw-alert" title={_("Files of an earlier version found")}>
+                    {cockpit.format(_("Apply and keep the changes to remove cockpit-firewall.service and move the old files to $0."), BACKUP_DIRECTORY)}
+                </Alert>
+            )}
+            {derived.drift && derived.source !== "legacy" && (
+                <Alert variant="warning" isInline className="fw-alert" title={cockpit.format(_("The loaded rules differ from $0"), NFTABLES_CONFIGURATION_PATH)}>
+                    {derived.source === "file"
+                        ? _("The editor shows the file. Apply loads it, replacing the loaded table inet cockpit_fw.")
+                        : _("The file has no rules of this app; the editor shows the loaded table. Apply writes it to the file.")}
+                </Alert>
+            )}
+            {(derived.fileRuleset?.unrecognized.length ?? 0) > 0 && (
+                <Alert variant="warning" isInline className="fw-alert" title={_("Parts of table inet cockpit_fw are not understood and are removed on the next apply")}>
+                    <ul className="fw-bullets">{derived.fileRuleset!.unrecognized.map(item => <li key={item}>{item}</li>)}</ul>
+                </Alert>
+            )}
             {problems.length > 0 && (
                 <Alert variant="danger" isInline title={_("The configuration has errors and cannot be applied")} className="fw-alert">
                     <ul className="fw-bullets">{problems.map(problem => <li key={problem}>{problem}</li>)}</ul>
                 </Alert>
             )}
-            {ruleset && ruleset.warnings.length > 0 && (
-                <Alert variant="warning" isInline title={_("Warnings")} className="fw-alert">
-                    <ul className="fw-bullets">{ruleset.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul>
-                </Alert>
-            )}
-            {hostState && hostState.otherManagers.length > 0 && (
+            {runtime && runtime.otherManagers.length > 0 && (
                 <Alert
                     variant="warning" isInline className="fw-alert"
-                    title={cockpit.format(_("Another firewall manager is running: $0"), hostState.otherManagers.join(", "))}
+                    title={cockpit.format(_("Another firewall manager is running: $0"), runtime.otherManagers.join(", "))}
                 >
                     {_("Its tables are evaluated independently: a drop in any base chain on the same hook still drops the packet, and it may flush the whole ruleset on reload. Prefer a single manager.")}
                 </Alert>
             )}
-            {hostState && hostState.foreignWarnings.length > 0 && (
+            {foreignWarnings.length > 0 && (
                 <Alert variant="warning" isInline className="fw-alert" title={_("Other tables drop traffic on the same hooks")}>
-                    <ul className="fw-bullets">{hostState.foreignWarnings.map(warning => <li key={warning}>{warning}</li>)}</ul>
+                    <ul className="fw-bullets">{foreignWarnings.map(warning => <li key={warning}>{warning}</li>)}</ul>
                     {_("An accept here does not override a drop there. See Other tables.")}
                 </Alert>
+            )}
+            {flushedTables.length > 0 && (
+                <Alert variant="warning" isInline className="fw-alert" title={cockpit.format(_("$0 starts with flush ruleset"), NFTABLES_CONFIGURATION_PATH)}>
+                    {cockpit.format(_("Restarting nftables.service or rebooting removes loaded tables the file does not define: $0. Their owners must recreate them (for example fail2ban does on restart). Apply never reloads the whole file."), flushedTables.join(", "))}
+                </Alert>
+            )}
+            {derived.stockFilterTableRemovable && (
+                <Card isCompact className="fw-card">
+                    <CardTitle>{_("Stock table inet filter")}</CardTitle>
+                    <CardBody>
+                        <Checkbox
+                            id="remove-stock-filter-table"
+                            isChecked={removeStockFilterTable}
+                            onChange={(_event, checked) => setRemoveStockFilterTable(checked)}
+                            isDisabled={pending}
+                            label={_("Remove the empty accept-all table inet filter shipped by the distribution")}
+                            description={cockpit.format(_("It has no rules and accepts everything. Apply deletes it from the kernel (restored on rollback) and from $0."), NFTABLES_CONFIGURATION_PATH)}
+                        />
+                    </CardBody>
+                </Card>
             )}
 
             <Card isCompact className="fw-card">
                 <CardTitle>{_("IPv4 forwarding")}</CardTitle>
                 <CardBody>
-                    {hostState?.forwarding && (
+                    {runtime?.forwarding && (
                         <>
-                            <Label color={hostState.forwarding.enabled ? "green" : "grey"} isCompact>
-                                {hostState.forwarding.enabled ? _("net.ipv4.ip_forward = 1") : _("net.ipv4.ip_forward = 0")}
+                            <Label color={runtime.forwarding.enabled ? "green" : "grey"} isCompact>
+                                {runtime.forwarding.enabled ? _("net.ipv4.ip_forward = 1") : _("net.ipv4.ip_forward = 0")}
                             </Label>{" "}
                             <span className="fw-muted">
-                                {hostState.forwarding.persistedByThisApplication
+                                {runtime.forwarding.persistedByThisApplication
                                     ? cockpit.format(_("Persisted by this app in $0."), SYSCTL_PATH)
                                     : _("Not persisted by this app.")}
                             </span>
@@ -202,20 +269,20 @@ export const ApplyPage = ({ configuration }: { configuration: FirewallConfigurat
             </Card>
 
             <Card isCompact className="fw-card">
-                <CardTitle>{unchanged ? _("Ruleset (applied)") : _("Pending changes")}</CardTitle>
+                <CardTitle>{upToDate ? cockpit.format(_("$0 (applied)"), NFTABLES_CONFIGURATION_PATH) : cockpit.format(_("Changes to $0"), NFTABLES_CONFIGURATION_PATH)}</CardTitle>
                 <CardBody>
-                    {ruleset && hostState && (unchanged
-                        ? <pre className="fw-diff">{ruleset.text}</pre>
-                        : <DiffView before={hostState.persistedRuleset} after={ruleset.text} />)}
+                    {applyPlan && (upToDate
+                        ? <pre className="fw-diff">{applyPlan.candidateFile}</pre>
+                        : <DiffView before={files.fileText ?? ""} after={applyPlan.candidateFile} />)}
                     <p className="fw-muted">
-                        {cockpit.format(_("Apply checks the ruleset with nft -c, loads it atomically and rolls back automatically after 60 seconds unless confirmed. Only confirmed rules are saved to $0 and loaded at boot by cockpit-firewall.service (ordered after nftables.service)."), PERSISTED_RULESET_PATH)}
+                        {cockpit.format(_("Apply checks the new file with nft -c and loads only table inet cockpit_fw, atomically. It rolls back automatically after 60 seconds unless you keep the changes. Only then is $0 written; nftables.service loads it at boot."), NFTABLES_CONFIGURATION_PATH)}
                     </p>
                 </CardBody>
             </Card>
 
-            <ExpandableSection toggleText={_("Currently loaded tables (with counters)")}>
-                <Button variant="link" onClick={refresh}>{_("Refresh")}</Button>
-                <pre className="fw-diff">{hostState?.liveTables || _("Not loaded.")}</pre>
+            <ExpandableSection toggleText={_("Currently loaded table inet cockpit_fw (with counters)")}>
+                <Button variant="link" onClick={() => onReload(false)}>{_("Refresh")}</Button>
+                <pre className="fw-diff">{files.liveOwnTable || _("Not loaded.")}</pre>
             </ExpandableSection>
 
             <Modal isOpen={pending} variant="small" aria-labelledby="confirm-title" onClose={() => undefined}>

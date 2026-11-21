@@ -10,11 +10,12 @@ import cockpit from 'cockpit';
 import { PageHeader, SimpleTable } from '../components.jsx';
 import { ForeignTable, SHARED_HOOKS } from '../coexistence.js';
 import { detectOtherFirewallManagers, listForeignTables } from '../firewall-backend.js';
+import { NFTABLES_CONFIGURATION_PATH, foreignPartOfFile } from '../nftables-file.js';
 
 const _ = cockpit.gettext;
 
-/** Read-only list of nftables tables owned by other software. */
-export const OtherTablesPage = () => {
+/** Read-only list of nftables tables owned by other software and of the rest of /etc/nftables.conf. */
+export const OtherTablesPage = ({ fileText }: { fileText: string | null }) => {
     const [tables, setTables] = useState<ForeignTable[] | null>(null);
     const [managers, setManagers] = useState<string[]>([]);
     const [error, setError] = useState<string | null>(null);
@@ -44,7 +45,7 @@ export const OtherTablesPage = () => {
             </Alert>
             {managers.length > 0 && (
                 <Alert variant="warning" isInline className="fw-alert" title={cockpit.format(_("Running: $0"), managers.join(", "))}>
-                    {_("These managers own their own tables and may flush the whole ruleset when they reload, removing this app's tables until cockpit-firewall.service is restarted.")}
+                    {_("These managers own their own tables and may flush the whole ruleset when they reload, removing this app's table until nftables.service is restarted or the host reboots.")}
                 </Alert>
             )}
             {error && <Alert variant="danger" isInline title={error} className="fw-alert" />}
@@ -71,6 +72,13 @@ export const OtherTablesPage = () => {
                     </CardBody>
                 </Card>
             ))}
+            <Card isCompact className="fw-card">
+                <CardTitle>{cockpit.format(_("Other content of $0"), NFTABLES_CONFIGURATION_PATH)}</CardTitle>
+                <CardBody>
+                    <p className="fw-muted">{_("Kept unchanged by Apply. Edit it by hand if needed.")}</p>
+                    <pre className="fw-diff">{fileText === null ? _("The file does not exist.") : foreignPartOfFile(fileText).trim() || _("Nothing else.")}</pre>
+                </CardBody>
+            </Card>
         </>
     );
 };

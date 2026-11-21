@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { describe, test } from "node:test";
 
 import { parseForeignTables, foreignTableWarnings } from "../../src/coexistence.ts";
@@ -147,11 +148,18 @@ describe("validation helpers", () => {
 });
 
 describe("transaction scripts", () => {
-    const apply = applyScriptText(true);
+    const apply = applyScriptText(true, false);
 
-    test("apply checks before snapshotting, arms rollback before loading, forwards only after loading", () => {
+    test("apply checks both texts before snapshotting, arms rollback before loading, forwards only after loading", () => {
         const order = [
+            "*[!0-9a-f]*|'') echo 'Invalid separator'",
+            "present|absent) ;;",
+            "awk -v separator=\"$1\"",
+            'sha256sum < "$state_directory/basis.conf"',
+            "exit 10",
             'nft -c -f "$state_directory/pending.nft"',
+            'nft -c -f "$state_directory/pending.conf"',
+            'echo "$basis_digest" > "$state_directory/file-digest"',
             "nft list table inet cockpit_fw",
             "systemd-run --quiet",
             'if ! nft -f "$state_directory/pending.nft"',
@@ -161,12 +169,41 @@ describe("transaction scripts", () => {
         assert.deepEqual([...order].sort((first, second) => first - second), order);
         assert.match(apply, /--on-active=60/);
         assert.match(apply, /setsid \/bin\/sh -c 'sleep 60;/);
-        assert.doesNotMatch(applyScriptText(false), /echo 1 > \/proc\/sys\/net\/ipv4\/ip_forward/);
+        assert.doesNotMatch(applyScriptText(false, false), /echo 1 > \/proc\/sys\/net\/ipv4\/ip_forward/);
     });
 
-    test("snapshot restores only own tables", () => {
-        assert.match(apply, /printf '%s\\n' 'table inet cockpit_fw' 'delete table inet cockpit_fw' 'table ip cockpit_fw_nat' 'delete table ip cockpit_fw_nat'/);
-        assert.doesNotMatch(apply, /list ruleset|flush ruleset/);
+    test("apply never loads the whole file or flushes other tables", () => {
+        for (const script of [apply, applyScriptText(false, true), confirmScriptText(), rollbackScriptText(), revertScriptText()]) {
+            assert.doesNotMatch(script, /flush ruleset|list ruleset/);
+            assert.doesNotMatch(script, /nft (-c )?-f "?(\$configuration_file|\/etc\/nftables\.conf)/);
+            assert.doesNotMatch(script, /nft -f "\$state_directory\/pending\.conf"/);
+            assert.doesNotMatch(script, /systemctl (re)?start nftables|systemctl restart|systemctl reload/);
+        }
+    });
+
+    test("snapshot restores only the tables the apply touches", () => {
+        assert.match(apply, /printf '%s\\n' 'table inet cockpit_fw' 'delete table inet cockpit_fw' 'table ip cockpit_fw_nat' 'delete table ip cockpit_fw_nat'\n/);
+        assert.doesNotMatch(apply, /inet filter/);
+        const removing = applyScriptText(false, true);
+        assert.match(removing, /'table inet filter' 'delete table inet filter'/);
+        assert.match(removing, /nft list table inet filter 2>\/dev\/null \|\| true/);
+    });
+
+    test("removing the stock table re-checks the live table under the lock, before loading", () => {
+        const removing = applyScriptText(false, true);
+        const checkStart = removing.indexOf("if stock_table=$(nft list table inet filter");
+        assert.ok(checkStart > removing.indexOf("flock 9") && checkStart < removing.indexOf("nft -f "));
+        assert.doesNotMatch(apply, /stock_table/);
+        const lines = removing.slice(checkStart).split("\n");
+        const check = lines.slice(0, lines.indexOf("fi") + 1).join("\n");
+        const run = (listing: string | null) => spawnSync("sh", ["-c", `set -eu\nnft() { ${listing === null ? "return 1" : "printf '%s' \"$LISTING\""}; }\n${check}`],
+                                                          { env: { ...process.env, LISTING: listing ?? "" } }).status;
+        const chain = (policy: string, rules = "") => `\tchain input {\n\t\ttype filter hook input priority filter; policy ${policy};\n${rules}\t}\n`;
+        assert.equal(run(null), 0);
+        assert.equal(run(`table inet filter {\n${chain("accept")}\tchain forward {\n\t\ttype filter hook forward priority 0; policy accept;\n\t}\n}\n`), 0);
+        assert.equal(run(`table inet filter {\n${chain("drop")}}\n`), 11);
+        assert.equal(run(`table inet filter {\n${chain("accept", "\t\ttcp dport 22 drop\n")}}\n`), 11);
+        assert.equal(run(`table inet filter {\n\tset blocked {\n\t\ttype ipv4_addr\n\t}\n}\n`), 11);
     });
 
     test("every script except status serializes on the transaction lock", () => {
@@ -189,24 +226,36 @@ describe("transaction scripts", () => {
 
     test("apply records whether confirm must persist forwarding", () => {
         assert.match(apply, /echo 1 > "\$state_directory\/forwarding"/);
-        assert.match(applyScriptText(false), /echo 0 > "\$state_directory\/forwarding"/);
+        assert.match(applyScriptText(false, false), /echo 0 > "\$state_directory\/forwarding"/);
         assert.match(confirmScriptText(), /if \[ "\$\(cat "\$state_directory\/forwarding" 2>\/dev\/null\)" = 1 \]/);
     });
 
-    test("confirm persists and starts the unit before cancelling rollback", () => {
+    test("confirm checks the file, backs it up, writes it and enables nftables.service before cancelling rollback", () => {
         const confirm = confirmScriptText();
         const order = [
-            'install -m 600 "$state_directory/pending.nft" "/etc/nftables.d/cockpit-fw.nft.new"',
+            'if [ "$(cat "$state_directory/token" 2>/dev/null)" != "${1:-}" ]; then',
+            "exit 10",
+            'target=$(readlink -f "$configuration_file"',
+            'cp -p "$target" "/var/backups/cockpit-firewall/nftables.conf.previous"',
+            'cat "$state_directory/pending.conf" > "$target.new"',
+            'mv -f "$target.new" "$target"',
             "net.ipv4.ip_forward = 1",
-            "WantedBy=sysinit.target nftables.service",
-            'systemctl enable "cockpit-firewall.service"',
-            'systemctl start "cockpit-firewall.service"',
+            "systemctl enable nftables.service",
             'mkdir "$state_directory/decision"',
             'systemctl stop "$rollback_unit.timer"',
             'rm -f "$state_directory/armed"',
+            'systemctl disable "cockpit-firewall.service"',
         ].map(fragment => confirm.indexOf(fragment));
         assert.ok(order.every(index => index >= 0), String(order));
         assert.deepEqual([...order].sort((first, second) => first - second), order);
+    });
+
+    test("confirm moves files of earlier versions to a backup instead of deleting them", () => {
+        const confirm = confirmScriptText();
+        for (const path of ["/etc/cockpit-firewall/config.json", "/etc/nftables.d/cockpit-fw.nft", "/etc/systemd/system/cockpit-firewall.service"])
+            assert.ok(confirm.includes(`mv -f "${path}" "$legacy_backup/"`), path);
+        assert.match(confirm, /legacy_backup="\/var\/backups\/cockpit-firewall\/legacy-\$\(date/);
+        assert.doesNotMatch(confirm, /rm -[a-z]*f? "\/etc\/(cockpit-firewall|nftables\.d)/);
     });
 
     test("failed persistence restores previous files and keeps the change pending", () => {
@@ -215,7 +264,9 @@ describe("transaction scripts", () => {
         assert.match(failure, /restore_previous_files/);
         assert.match(failure, /exit 8/);
         assert.doesNotMatch(failure, /armed|decision/);
-        assert.match(confirm, /cp -p "\/etc\/nftables.d\/cockpit-fw.nft" "\$state_directory\/backup"\/cockpit-fw.nft/);
+        const restore = confirm.slice(confirm.indexOf("restore_previous_files() {"), confirm.indexOf("persist() {"));
+        assert.match(restore, /cp -p "\/var\/backups\/cockpit-firewall\/nftables.conf.previous" "\$target"; else rm -f "\$target"/);
+        assert.match(restore, /systemctl disable nftables.service/);
     });
 
     test("rollback reports a failed restore through its exit status", () => {
@@ -230,7 +281,7 @@ describe("transaction scripts", () => {
             assert.ok(check > script.indexOf("flock 9"), "token check runs under the lock");
             assert.match(script.slice(check), /^[^\n]+\n[^\n]+\n\s*exit 9\n/);
         }
-        assert.ok(confirmScriptText().indexOf("!= \"${1:-}\"") < confirmScriptText().indexOf("install -m 600"));
+        assert.ok(confirmScriptText().indexOf("!= \"${1:-}\"") < confirmScriptText().indexOf("persist() {"));
     });
 
     test("revert runs rollback immediately", () => {

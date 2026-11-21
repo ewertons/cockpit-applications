@@ -3,7 +3,7 @@
  * hand-written rulesets, ...). Parses `nft -j list chains` output.
  */
 
-import { INET_TABLE_NAME, NAT_TABLE_NAME } from './model.js';
+import { INET_TABLE_NAME, LEGACY_NAT_TABLE_NAME } from './model.js';
 
 export interface BaseChainSummary {
     name: string;
@@ -22,7 +22,7 @@ export interface ForeignTable {
 
 /** @returns whether the table belongs to this application. */
 export function isOwnTable(family: string, name: string): boolean {
-    return (family === "inet" && name === INET_TABLE_NAME) || (family === "ip" && name === NAT_TABLE_NAME);
+    return (family === "inet" && name === INET_TABLE_NAME) || (family === "ip" && name === LEGACY_NAT_TABLE_NAME);
 }
 
 /**

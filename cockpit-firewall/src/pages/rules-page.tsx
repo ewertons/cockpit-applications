@@ -11,7 +11,7 @@ import type { ConfigurationPageProps } from '../app.jsx';
 import { PageHeader, SelectChoice, SelectField, SimpleTable, TextField, moveItem, removeItem, replaceItem } from '../components.jsx';
 import { ANY_SERVICE, Endpoint, FirewallConfiguration, MANAGEMENT_TCP_PORTS, Verdict, allServices, describeEndpoint } from '../model.js';
 import { describeVerdict } from '../ruleset.js';
-import { parseAddress } from '../validation.js';
+import { isValidComment, parseAddress } from '../validation.js';
 
 const _ = cockpit.gettext;
 
@@ -34,6 +34,21 @@ function serviceChoices(configuration: FirewallConfiguration): SelectChoice[] {
     return allServices(configuration).map(service => ({ value: service.name, label: service.name }));
 }
 
+/**
+ * @returns `{ comment }` for a non-empty valid comment, `{}` for an empty one,
+ * or null after reporting an invalid one.
+ */
+function commentField(comment: string, setError: ErrorSetter): { comment?: string } | null {
+    const trimmed = comment.trim();
+    if (!trimmed)
+        return {};
+    if (!isValidComment(trimmed)) {
+        setError(_("Comments are up to 100 printable ASCII characters, without quotes or backslashes, and may not start with @ or cockpit-firewall:."));
+        return null;
+    }
+    return { comment: trimmed };
+}
+
 function endpointFromSelection(zone: string, host: string): Endpoint {
     return { ...zone ? { zone } : {}, ...host ? { host } : {} };
 }
@@ -53,15 +68,21 @@ function RuleControls<T extends { enabled: boolean }>({ idPrefix, rules, index, 
     );
 }
 
-const ForwardRulesCard = ({ configuration, onChange }: ConfigurationPageProps) => {
+const ForwardRulesCard = ({ configuration, onChange, setError }: ConfigurationPageProps & { setError: ErrorSetter }) => {
     const [fromZone, setFromZone] = useState("");
     const [fromHost, setFromHost] = useState("");
     const [toZone, setToZone] = useState("");
     const [toHost, setToHost] = useState("");
     const [service, setService] = useState(ANY_SERVICE);
     const [action, setAction] = useState<Verdict>("accept");
+    const [comment, setComment] = useState("");
 
     const add = () => {
+        const commentProperty = commentField(comment, setError);
+        if (!commentProperty)
+            return;
+        setError(null);
+        setComment("");
         onChange({
             ...configuration,
             forwardRules: [...configuration.forwardRules, {
@@ -70,6 +91,7 @@ const ForwardRulesCard = ({ configuration, onChange }: ConfigurationPageProps) =
                 service,
                 action,
                 enabled: true,
+                ...commentProperty,
             }],
         });
     };
@@ -82,7 +104,7 @@ const ForwardRulesCard = ({ configuration, onChange }: ConfigurationPageProps) =
                     {_("Traffic routed through this host. Evaluated top to bottom after established/related traffic is accepted; unmatched traffic gets the default forward policy of the zone it entered from.")}
                 </p>
                 <SimpleTable
-                    headers={["#", _("From"), _("To"), _("Service"), _("Action"), ""]}
+                    headers={["#", _("From"), _("To"), _("Service"), _("Action"), _("Comment"), ""]}
                     emptyText={_("No forward rules.")}
                     rows={configuration.forwardRules.map((rule, index) => [
                         String(index + 1),
@@ -90,6 +112,7 @@ const ForwardRulesCard = ({ configuration, onChange }: ConfigurationPageProps) =
                         describeEndpoint(rule.to),
                         rule.service,
                         describeVerdict(rule.action),
+                        rule.comment ?? "",
                         <RuleControls
                             key="controls" idPrefix="forward" rules={configuration.forwardRules} index={index}
                             onRulesChange={forwardRules => onChange({ ...configuration, forwardRules })}
@@ -103,6 +126,7 @@ const ForwardRulesCard = ({ configuration, onChange }: ConfigurationPageProps) =
                     <SelectField fieldId="forward-to-host" label={_("To host")} value={toHost} choices={hostChoices(configuration)} onChange={setToHost} />
                     <SelectField fieldId="forward-service" label={_("Service")} value={service} choices={serviceChoices(configuration)} onChange={setService} />
                     <SelectField fieldId="forward-action" label={_("Action")} value={action} choices={ACTION_CHOICES} onChange={value => setAction(value as Verdict)} />
+                    <TextField fieldId="forward-comment" label={_("Comment")} value={comment} onChange={setComment} placeholder={_("optional")} />
                     <Button variant="secondary" type="submit">{_("Add forward rule")}</Button>
                 </Form>
             </CardBody>
@@ -114,6 +138,7 @@ const NatRulesCard = ({ configuration, onChange, setError }: ConfigurationPagePr
     const [sourceZone, setSourceZone] = useState("");
     const [sourceAddress, setSourceAddress] = useState("");
     const [egressZone, setEgressZone] = useState("");
+    const [comment, setComment] = useState("");
 
     const add = () => {
         const trimmedSource = sourceAddress.trim();
@@ -129,6 +154,9 @@ const NatRulesCard = ({ configuration, onChange, setError }: ConfigurationPagePr
                 return setError(_("Source must be an IPv4 address/CIDR (e.g. 10.99.0.0/24) or a host name."));
             normalizedSource = host ? host.name : parsed!.text;
         }
+        const commentProperty = commentField(comment, setError);
+        if (!commentProperty)
+            return;
         setError(null);
         onChange({
             ...configuration,
@@ -137,9 +165,11 @@ const NatRulesCard = ({ configuration, onChange, setError }: ConfigurationPagePr
                 ...normalizedSource ? { sourceAddress: normalizedSource } : {},
                 egressZone,
                 enabled: true,
+                ...commentProperty,
             }],
         });
         setSourceAddress("");
+        setComment("");
     };
 
     return (
@@ -147,13 +177,14 @@ const NatRulesCard = ({ configuration, onChange, setError }: ConfigurationPagePr
             <CardTitle>{_("NAT (IPv4 masquerade)")}</CardTitle>
             <CardBody>
                 <SimpleTable
-                    headers={["#", _("Source zone"), _("Source address"), _("Egress zone"), ""]}
+                    headers={["#", _("Source zone"), _("Source address"), _("Egress zone"), _("Comment"), ""]}
                     emptyText={_("No NAT rules.")}
                     rows={configuration.natRules.map((rule, index) => [
                         String(index + 1),
                         rule.sourceZone ?? _("any"),
                         rule.sourceAddress ?? _("any"),
                         rule.egressZone,
+                        rule.comment ?? "",
                         <RuleControls
                             key="controls" idPrefix="nat" rules={configuration.natRules} index={index}
                             onRulesChange={natRules => onChange({ ...configuration, natRules })}
@@ -167,6 +198,7 @@ const NatRulesCard = ({ configuration, onChange, setError }: ConfigurationPagePr
                         fieldId="nat-egress-zone" label={_("Egress zone")} value={egressZone}
                         choices={[{ value: "", label: _("Select a zone") }, ...zoneChoices(configuration, "").slice(1)]} onChange={setEgressZone}
                     />
+                    <TextField fieldId="nat-comment" label={_("Comment")} value={comment} onChange={setComment} placeholder={_("optional")} />
                     <Button variant="secondary" type="submit">{_("Add NAT rule")}</Button>
                 </Form>
             </CardBody>
@@ -174,16 +206,32 @@ const NatRulesCard = ({ configuration, onChange, setError }: ConfigurationPagePr
     );
 };
 
-const InputRulesCard = ({ configuration, onChange }: ConfigurationPageProps) => {
+const InputRulesCard = ({ configuration, onChange, setError }: ConfigurationPageProps & { setError: ErrorSetter }) => {
     const [fromZone, setFromZone] = useState("");
     const [fromHost, setFromHost] = useState("");
+    const [destinationHost, setDestinationHost] = useState("");
     const [service, setService] = useState("ssh");
     const [action, setAction] = useState<Verdict>("accept");
+    const [comment, setComment] = useState("");
 
-    const add = () => onChange({
-        ...configuration,
-        inputRules: [...configuration.inputRules, { from: endpointFromSelection(fromZone, fromHost), service, action, enabled: true }],
-    });
+    const add = () => {
+        const commentProperty = commentField(comment, setError);
+        if (!commentProperty)
+            return;
+        setError(null);
+        setComment("");
+        onChange({
+            ...configuration,
+            inputRules: [...configuration.inputRules, {
+                from: endpointFromSelection(fromZone, fromHost),
+                ...destinationHost ? { destinationHost } : {},
+                service,
+                action,
+                enabled: true,
+                ...commentProperty,
+            }],
+        });
+    };
 
     return (
         <Card isCompact className="fw-card">
@@ -201,16 +249,18 @@ const InputRulesCard = ({ configuration, onChange }: ConfigurationPageProps) => 
                     </Alert>
                 )}
                 <p className="fw-muted">
-                    {_("The input chain is only generated when an input rule exists or a zone has input default Drop. Loopback, ICMP, DHCP replies and imported WireGuard listen ports are always accepted.")}
+                    {_("The input chain is only generated when an input rule exists, a zone has input default Drop or management access is off. Loopback, ICMP echo requests, ICMPv6 and DHCP replies are always accepted. Importing WireGuard peers adds a rule for the listen port.")}
                 </p>
                 <SimpleTable
-                    headers={["#", _("From"), _("Service"), _("Action"), ""]}
+                    headers={["#", _("From"), _("To"), _("Service"), _("Action"), _("Comment"), ""]}
                     emptyText={_("No input rules.")}
                     rows={configuration.inputRules.map((rule, index) => [
                         String(index + 1),
                         describeEndpoint(rule.from),
+                        rule.destinationHost ?? _("this host"),
                         rule.service,
                         describeVerdict(rule.action),
+                        rule.comment ?? "",
                         <RuleControls
                             key="controls" idPrefix="input" rules={configuration.inputRules} index={index}
                             onRulesChange={inputRules => onChange({ ...configuration, inputRules })}
@@ -220,8 +270,13 @@ const InputRulesCard = ({ configuration, onChange }: ConfigurationPageProps) => 
                 <Form className="fw-add-form" onSubmit={event => { event.preventDefault(); add() }}>
                     <SelectField fieldId="input-from-zone" label={_("From zone")} value={fromZone} choices={zoneChoices(configuration, _("Any zone"))} onChange={setFromZone} />
                     <SelectField fieldId="input-from-host" label={_("From host")} value={fromHost} choices={hostChoices(configuration)} onChange={setFromHost} />
+                    <SelectField
+                        fieldId="input-destination-host" label={_("To address")} value={destinationHost}
+                        choices={[{ value: "", label: _("Any address of this host") }, ...hostChoices(configuration).slice(1)]} onChange={setDestinationHost}
+                    />
                     <SelectField fieldId="input-service" label={_("Service")} value={service} choices={serviceChoices(configuration)} onChange={setService} />
                     <SelectField fieldId="input-action" label={_("Action")} value={action} choices={ACTION_CHOICES} onChange={value => setAction(value as Verdict)} />
+                    <TextField fieldId="input-comment" label={_("Comment")} value={comment} onChange={setComment} placeholder={_("optional")} />
                     <Button variant="secondary" type="submit">{_("Add input rule")}</Button>
                 </Form>
             </CardBody>
@@ -233,11 +288,11 @@ export const RulesPage = (props: ConfigurationPageProps) => {
     const [error, setError] = useState<string | null>(null);
     return (
         <>
-            <PageHeader title={_("Rules")} description={_("Changes are saved as a draft; apply them from Status & apply.")} />
+            <PageHeader title={_("Rules")} description={_("Changes stay in this browser tab until applied from Status & apply.")} />
             {error && <Alert variant="danger" isInline title={error} className="fw-alert" />}
-            <ForwardRulesCard {...props} />
+            <ForwardRulesCard {...props} setError={setError} />
             <NatRulesCard {...props} setError={setError} />
-            <InputRulesCard {...props} />
+            <InputRulesCard {...props} setError={setError} />
         </>
     );
 };
